@@ -1,278 +1,110 @@
-name: Generate Infrastructure Diagram
+name: Diagrama de Infraestructura
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'terraform/**'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'terraform/**'
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
-  # ============================================================================
-  # JOB 1: GENERAR DIAGRAMA DE INFRAESTRUCTURA
-  # ============================================================================
   generate-diagram:
-    name: 🏗️ Generate Infrastructure Diagram
     runs-on: ubuntu-latest
     
-    permissions:
-      contents: write
-      pull-requests: write
-      
     steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: 🔧 Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: '1.5.0'
-        
-    - name: 🐍 Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: 📦 Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install diagrams
-        pip install graphviz
-        sudo apt-get update
-        sudo apt-get install -y graphviz
-        
-    - name: 🚀 Initialize Terraform
-      run: |
-        cd terraform
-        terraform init -backend=false
-        
-    - name: 📊 Generate Infrastructure Diagram
-      run: |
-        # Crear directorio para diagramas si no existe
-        mkdir -p docs/diagrams
-        
-        # Crear script Python para generar el diagrama
-        cat > generate_infra_diagram.py << 'EOF'
-        from diagrams import Diagram, Cluster, Node
-        from diagrams.gcp.compute import CloudRun
-        from diagrams.gcp.database import SQL
-        from diagrams.gcp.devtools import ContainerRegistry
-        from diagrams.gcp.network import LoadBalancing
-        from diagrams.onprem.client import Users
-        from diagrams.programming.language import JavaScript, Csharp
-        
-        with Diagram("Babysitter App - Infrastructure", filename="docs/diagrams/infrastructure", show=False, direction="TB"):
-            # Usuarios
-            users = Users("Users")
-            
-            # Google Cloud Platform
-            with Cluster("Google Cloud Platform"):
-                # Load Balancer
-                lb = LoadBalancing("Load Balancer")
-                
-                # Cloud Run Services
-                with Cluster("Cloud Run"):
-                    frontend = CloudRun("Frontend\n(React + nginx)")
-                    backend = CloudRun("Backend\n(.NET Core API)")
-                
-                # Base de datos
-                database = SQL("Cloud SQL\n(MySQL)")
-                
-                # Registry
-                registry = ContainerRegistry("Artifact Registry\n(Docker Images)")
-            
-            # Conexiones
-            users >> lb
-            lb >> frontend
-            frontend >> backend
-            backend >> database
-            registry >> [frontend, backend]
-        
-        print("✅ Infrastructure diagram generated successfully!")
-        EOF
-        
-        # Ejecutar el script
-        python generate_infra_diagram.py
-        
-    - name: 📊 Generate Terraform Graph
-      run: |
-        cd terraform
-        # Generar gráfico de dependencias de Terraform
-        terraform graph > ../docs/diagrams/terraform_graph.dot
-        
-        # Convertir DOT a PNG
-        dot -Tpng ../docs/diagrams/terraform_graph.dot -o ../docs/diagrams/terraform_dependencies.png
-        
-        # Crear archivo README para explicar los diagramas
-        cat > ../docs/diagrams/README.md << 'EOF'
-        # Infrastructure Diagrams
-        
-        Este directorio contiene diagramas generados automáticamente de la infraestructura.
-        
-        ## Diagramas Disponibles
-        
-        ### 1. Infrastructure Overview
-        ![Infrastructure](infrastructure.png)
-        
-        Diagrama de alto nivel mostrando la arquitectura completa de la aplicación Babysitter.
-        
-        **Componentes:**
-        - **Frontend**: Aplicación React servida desde Cloud Run
-        - **Backend**: API .NET Core en Cloud Run
-        - **Database**: Cloud SQL MySQL
-        - **Registry**: Artifact Registry para imágenes Docker
-        
-        ### 2. Terraform Dependencies
-        ![Terraform Dependencies](terraform_dependencies.png)
-        
-        Gráfico de dependencias entre recursos de Terraform mostrando el orden de creación y relaciones.
-        
-        ## Actualización Automática
-        
-        Estos diagramas se actualizan automáticamente cuando:
-        - Se hacen cambios en archivos `terraform/**`
-        - Se ejecuta manualmente el workflow "Generate Infrastructure Diagram"
-        
-        ## Generación Local
-        
-        Para generar los diagramas localmente:
-        
-        ```bash
-        # Instalar dependencias
-        pip install diagrams graphviz
-        sudo apt-get install graphviz  # En Ubuntu/Debian
-        
-        # Ejecutar generación
-        python generate_infra_diagram.py
-        
-        # Generar gráfico de Terraform
-        cd terraform
-        terraform graph | dot -Tpng > terraform_dependencies.png
-        ```
-        EOF
-        
-        echo "✅ Terraform graph generated successfully!"
-        
-    - name: 📝 Create Mermaid Diagram
-      run: |
-        # Crear diagrama Mermaid para GitHub
-        cat > docs/diagrams/infrastructure.md << 'EOF'
-        # Infrastructure Architecture
-        
-        ```mermaid
-        graph TB
-            Users[👥 Users] --> LB[🌐 Load Balancer]
-            
-            subgraph "Google Cloud Platform"
-                LB --> Frontend[🎨 Frontend<br/>React + Nginx<br/>Cloud Run]
-                Frontend --> Backend[⚙️ Backend<br/>.NET Core API<br/>Cloud Run]
-                Backend --> DB[(🗄️ Cloud SQL<br/>MySQL)]
-                
-                subgraph "CI/CD"
-                    Registry[📦 Artifact Registry<br/>Docker Images]
-                    Registry -.-> Frontend
-                    Registry -.-> Backend
-                end
-                
-                subgraph "Services"
-                    APIs[🔧 Google APIs<br/>- Cloud Run<br/>- Cloud SQL<br/>- Artifact Registry<br/>- Cloud Build]
-                end
-            end
-            
-            style Frontend fill:#e1f5fe
-            style Backend fill:#fff3e0
-            style DB fill:#f3e5f5
-            style Registry fill:#e8f5e8
-        ```
-        
-        ## Architecture Components
-        
-        | Component | Technology | Purpose |
-        |-----------|------------|---------|
-        | Frontend | React 18 + Material-UI | User interface |
-        | Backend | .NET Core 8 + Entity Framework | REST API |
-        | Database | Cloud SQL MySQL | Data persistence |
-        | Registry | Artifact Registry | Docker image storage |
-        | Infrastructure | Terraform | Infrastructure as Code |
-        
-        ## Data Flow
-        
-        1. **User Request** → Load Balancer → Frontend (Cloud Run)
-        2. **API Calls** → Frontend → Backend (Cloud Run)
-        3. **Database Operations** → Backend → Cloud SQL MySQL
-        4. **Image Deployment** → Artifact Registry → Cloud Run Services
-        EOF
-        
-    - name: 📤 Commit and Push Diagrams
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        
-        # Agregar archivos generados
-        git add docs/diagrams/
-        
-        # Verificar si hay cambios
-        if git diff --staged --quiet; then
-          echo "No changes in diagrams to commit"
-        else
-          git commit -m "🏗️ Update infrastructure diagrams [automated]
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+      
+      - name: Install Graphviz
+        run: sudo apt-get install -y graphviz
+      
+      - name: Install terraform-docs
+        run: |
+          curl -Lo ./terraform-docs.tar.gz https://github.com/terraform-docs/terraform-docs/releases/download/v0.16.0/terraform-docs-v0.16.0-$(uname)-amd64.tar.gz
+          tar -xzf terraform-docs.tar.gz
+          chmod +x terraform-docs
+          sudo mv terraform-docs /usr/local/bin/
+      
+      - name: Generate Terraform Graph
+        working-directory: terraform
+        run: |
+          terraform init
           
-          - Generated infrastructure overview diagram
-          - Updated Terraform dependencies graph
-          - Created Mermaid architecture diagram
-          - Updated documentation
+          # Crear directamente un archivo DOT simplificado sin usar terraform graph
+          echo "Creando diagrama simplificado de infraestructura..."
+          cat > terraform-graph.dot << EOF
+          digraph {
+            rankdir = LR;
+            
+            // Nodos principales - Servicios de Google Cloud
+            "google_project_service" [shape=box, style=filled, fillcolor=lightblue, label="Google Cloud\\nAPIs"];
+            "google_sql_database_instance" [shape=box, style=filled, fillcolor=lightgreen, label="Cloud SQL\\nMySQL"];
+            "google_sql_database" [shape=box, style=filled, fillcolor=lightgreen, label="BabysitterApp\\nDatabase"];
+            "google_sql_user" [shape=box, style=filled, fillcolor=lightgreen, label="Database\\nUser"];
+            "google_artifact_registry_repository" [shape=box, style=filled, fillcolor=orange, label="Artifact Registry\\nDocker Images"];
+            "google_cloud_run_service_backend" [shape=box, style=filled, fillcolor=yellow, label="Cloud Run\\nBackend API"];
+            "google_cloud_run_service_frontend" [shape=box, style=filled, fillcolor=yellow, label="Cloud Run\\nFrontend React"];
+            
+            // Relaciones principales
+            "google_project_service" -> "google_sql_database_instance";
+            "google_project_service" -> "google_artifact_registry_repository";
+            "google_sql_database_instance" -> "google_sql_database";
+            "google_sql_database_instance" -> "google_sql_user";
+            "google_artifact_registry_repository" -> "google_cloud_run_service_backend";
+            "google_artifact_registry_repository" -> "google_cloud_run_service_frontend";
+            "google_sql_database" -> "google_cloud_run_service_backend";
+            "google_sql_user" -> "google_cloud_run_service_backend";
+            "google_cloud_run_service_backend" -> "google_cloud_run_service_frontend";
+            
+            // Configuración del gráfico
+            label = "Babysitter App - Infraestructura en Google Cloud Platform";
+            fontsize = 20;
+            fontname = "Arial Bold";
+            
+            // Subgrafos para agrupar componentes
+            subgraph cluster_0 {
+              label = "Database Layer";
+              style = filled;
+              fillcolor = lightgray;
+              "google_sql_database_instance";
+              "google_sql_database";
+              "google_sql_user";
+            }
+            
+            subgraph cluster_1 {
+              label = "Application Layer";
+              style = filled;
+              fillcolor = lightyellow;
+              "google_cloud_run_service_backend";
+              "google_cloud_run_service_frontend";
+            }
+            
+            subgraph cluster_2 {
+              label = "Container Registry";
+              style = filled;
+              fillcolor = lightcyan;
+              "google_artifact_registry_repository";
+            }
+          }
+          EOF
           
-          Generated by: ${{ github.workflow }} #${{ github.run_number }}"
-          
+          # Generar imagen con el archivo DOT creado manualmente
+          dot -Tpng terraform-graph.dot -o terraform-graph.png
+      
+      - name: Generate Infrastructure Documentation
+        working-directory: terraform
+        run: |
+          terraform-docs markdown . > infra-docs.md
+      
+      - name: Commit and Push Diagram
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          mkdir -p docs/diagrams
+          cp terraform/terraform-graph.png docs/diagrams/
+          cp terraform/infra-docs.md docs/
+          git add docs/diagrams/terraform-graph.png docs/infra-docs.md
+          git commit -m "Actualizar diagrama de infraestructura [skip ci]" || echo "No changes to commit"
           git push
-          echo "✅ Diagrams updated and pushed successfully!"
-        fi
-        
-    - name: 📋 Add PR Comment
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          const output = `## 🏗️ Infrastructure Diagrams Updated
-          
-          The infrastructure diagrams have been automatically generated and updated:
-          
-          ### 📊 Available Diagrams
-          - **Infrastructure Overview**: Visual representation of the complete architecture
-          - **Terraform Dependencies**: Graph showing resource dependencies
-          - **Mermaid Diagram**: Interactive architecture diagram in markdown
-          
-          ### 📁 Location
-          All diagrams are available in \`docs/diagrams/\`
-          
-          ### 🔄 Changes
-          This update includes the latest infrastructure changes from your Terraform configuration.
-          
-          *Generated by: ${{ github.workflow }} - Run #${{ github.run_number }}*`;
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: output
-          })
-          
-    - name: 📊 Generate Summary
-      run: |
-        echo "## 🏗️ Infrastructure Diagrams Generated Successfully!" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 📋 Generated Files:" >> $GITHUB_STEP_SUMMARY
-        echo "- \`docs/diagrams/infrastructure.png\` - Visual infrastructure diagram" >> $GITHUB_STEP_SUMMARY
-        echo "- \`docs/diagrams/terraform_dependencies.png\` - Terraform dependency graph" >> $GITHUB_STEP_SUMMARY
-        echo "- \`docs/diagrams/infrastructure.md\` - Mermaid architecture diagram" >> $GITHUB_STEP_SUMMARY
-        echo "- \`docs/diagrams/README.md\` - Documentation" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 🔄 Next Updates:" >> $GITHUB_STEP_SUMMARY
-        echo "Diagrams will be automatically updated when Terraform files change." >> $GITHUB_STEP_SUMMARY
