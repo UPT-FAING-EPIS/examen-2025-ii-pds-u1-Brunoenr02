@@ -75,7 +75,7 @@ jobs:
           done
           
           if [ -z "$INGRESS_IP" ]; then
-            echo "❌ Error: El Ingress no obtuvo una dirección IP a tiempo."
+            echo "ERROR: El Ingress no obtuvo una dirección IP a tiempo."
             echo "Verificando estado del cluster..."
             kubectl get pods
             kubectl get services
@@ -88,7 +88,7 @@ jobs:
           HEALTH_URL="http://$INGRESS_IP/api/health"
           for i in {1..30}; do
             if curl --output /dev/null --silent --head --fail "$HEALTH_URL"; then
-              echo "✅ La aplicación está saludable y respondió correctamente."
+              echo "La aplicación está saludable y respondió correctamente."
               break
             fi
             echo "La aplicación no está lista. Esperando 10 segundos..."
@@ -96,7 +96,7 @@ jobs:
           done
 
           if [ $? -ne 0 ]; then
-              echo "❌ Error: La aplicación no respondió a tiempo en la URL de salud."
+              echo "ERROR: La aplicación no respondió a tiempo en la URL de salud."
               echo "Verificando logs del backend..."
               kubectl logs -l app=babysitter-backend --tail=50
               exit 1
@@ -111,11 +111,11 @@ jobs:
 
           # Verifica si la respuesta contiene un token de autenticación
           if echo "$RESPONSE" | grep -q "token"; then
-            echo "✅ El registro de usuario fue exitoso y se recibió un token."
+            echo "El registro de usuario fue exitoso y se recibió un token."
             echo "Respuesta de la API:"
             echo "$RESPONSE"
           else
-            echo "⚠️ El registro de usuario tuvo una respuesta diferente."
+            echo "ADVERTENCIA: El registro de usuario tuvo una respuesta diferente."
             echo "Respuesta de la API:"
             echo "$RESPONSE"
             # No fallar si solo es un tema de registro, la app puede estar funcionando
@@ -126,12 +126,12 @@ jobs:
           NANNIES_RESPONSE=$(curl -s "http://$INGRESS_IP/api/nannies")
           
           if echo "$NANNIES_RESPONSE" | grep -q '\[' || echo "$NANNIES_RESPONSE" | grep -q 'nannies'; then
-            echo "✅ El endpoint de niñeras responde correctamente."
+            echo "El endpoint de niñeras responde correctamente."
           else
-            echo "⚠️ El endpoint de niñeras respuesta:"
+            echo "ADVERTENCIA: El endpoint de niñeras respuesta:"
             echo "$NANNIES_RESPONSE"
           fi
 
-          echo "🎉 Despliegue completado exitosamente!"
-          echo "📱 Frontend disponible en: http://$INGRESS_IP"
-          echo "🔌 API Backend disponible en: http://$INGRESS_IP/api"
+          echo "Despliegue completado exitosamente!"
+          echo "Frontend disponible en: http://$INGRESS_IP"
+          echo "API Backend disponible en: http://$INGRESS_IP/api"

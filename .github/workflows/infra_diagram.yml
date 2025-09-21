@@ -133,7 +133,7 @@ jobs:
             
             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
               if git push; then
-                echo "✅ Push exitoso"
+                echo "Push exitoso"
                 break
               else
                 RETRY_COUNT=$((RETRY_COUNT+1))
@@ -144,7 +144,7 @@ jobs:
             done
             
             if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-              echo "❌ No se pudo hacer push después de $MAX_RETRIES intentos"
+              echo "ERROR: No se pudo hacer push después de $MAX_RETRIES intentos"
               exit 1
             fi
           fi

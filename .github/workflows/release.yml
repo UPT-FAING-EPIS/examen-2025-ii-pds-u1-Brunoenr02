@@ -1,4 +1,4 @@
-name: 🏷️ Release Management
+name: Release Management
 on:
   push:
     branches: [main]
@@ -35,7 +35,7 @@ jobs:
   # VERSION CALCULATION - Semantic Versioning
   # ============================================================================
   calculate-version:
-    name: 📊 Calculate Version
+    name: Calculate Version
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -156,10 +156,10 @@ jobs:
             echo "$COMMITS" | grep -E "^- feat(\(.*\))?:" | sed 's/^- feat[^:]*: /- ✨ /' >> TEMP_CHANGELOG.md || true
             echo "$COMMITS" | grep -E "^- fix(\(.*\))?:" | sed 's/^- fix[^:]*: /- 🐛 /' >> TEMP_CHANGELOG.md || true
             echo "$COMMITS" | grep -E "^- perf(\(.*\))?:" | sed 's/^- perf[^:]*: /- ⚡ /' >> TEMP_CHANGELOG.md || true
-            echo "$COMMITS" | grep -E "^- docs(\(.*\))?:" | sed 's/^- docs[^:]*: /- 📚 /' >> TEMP_CHANGELOG.md || true
+            echo "$COMMITS" | grep -E "^- docs(\(.*\))?:" | sed 's/^- docs[^:]*: /- /' >> TEMP_CHANGELOG.md || true
             echo "$COMMITS" | grep -E "^- style(\(.*\))?:" | sed 's/^- style[^:]*: /- 💎 /' >> TEMP_CHANGELOG.md || true
             echo "$COMMITS" | grep -E "^- refactor(\(.*\))?:" | sed 's/^- refactor[^:]*: /- ♻️ /' >> TEMP_CHANGELOG.md || true
-            echo "$COMMITS" | grep -E "^- test(\(.*\))?:" | sed 's/^- test[^:]*: /- ✅ /' >> TEMP_CHANGELOG.md || true
+            echo "$COMMITS" | grep -E "^- test(\(.*\))?:" | sed 's/^- test[^:]*: /- /' >> TEMP_CHANGELOG.md || true
             echo "$COMMITS" | grep -E "^- chore(\(.*\))?:" | sed 's/^- chore[^:]*: /- 🔧 /' >> TEMP_CHANGELOG.md || true
             
             # Add other commits
@@ -197,7 +197,7 @@ jobs:
   # BUILD RELEASE ASSETS
   # ============================================================================
   build-assets:
-    name: 🔨 Build Release Assets
+    name: Build Release Assets
     runs-on: ubuntu-latest
     needs: calculate-version
     if: needs.calculate-version.outputs.is-release == 'true'
@@ -285,7 +285,7 @@ jobs:
   # BUILD AND PUSH DOCKER IMAGES
   # ============================================================================
   build-docker-images:
-    name: 🐳 Build Docker Images
+    name: Build Docker Images
     runs-on: ubuntu-latest
     needs: calculate-version
     if: needs.calculate-version.outputs.is-release == 'true'
@@ -329,13 +329,13 @@ jobs:
           docker push ${BASE_URL}:${VERSION}
           docker push ${BASE_URL}:latest
           
-          echo "✅ Pushed ${IMAGE_NAME}:${VERSION}"
+          echo "Pushed ${IMAGE_NAME}:${VERSION}"
 
   # ============================================================================
   # CREATE GITHUB RELEASE
   # ============================================================================
   create-release:
-    name: 🏷️ Create GitHub Release
+    name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [calculate-version, build-assets, build-docker-images]
     if: needs.calculate-version.outputs.is-release == 'true'
@@ -398,7 +398,7 @@ jobs:
   # POST-RELEASE ACTIVITIES
   # ============================================================================
   post-release:
-    name: 📝 Post-Release Activities
+    name: Post-Release Activities
     runs-on: ubuntu-latest
     needs: [calculate-version, create-release]
     if: needs.calculate-version.outputs.is-release == 'true'
@@ -463,14 +463,14 @@ jobs:
 
       - name: Create summary
         run: |
-          echo "## 🎉 Release v${{ needs.calculate-version.outputs.version }} Created Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "## Release v${{ needs.calculate-version.outputs.version }} Created Successfully!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📦 Release Details" >> $GITHUB_STEP_SUMMARY
           echo "- **Version:** v${{ needs.calculate-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Release URL:** ${{ needs.create-release.outputs.release-url }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Pre-release:** ${{ github.event.inputs.pre_release == 'true' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🐳 Docker Images" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Images" >> $GITHUB_STEP_SUMMARY
           echo "- \`gcr.io/${{ env.GOOGLE_CLOUD_PROJECT }}/babysitter-app-frontend:v${{ needs.calculate-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`gcr.io/${{ env.GOOGLE_CLOUD_PROJECT }}/babysitter-app-backend:v${{ needs.calculate-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

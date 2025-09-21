@@ -59,18 +59,18 @@ jobs:
           
           # Crear página principal de documentación
           cat > docs/site/index.md << 'EOF'
-          # 📚 Documentación Babysitter App
+          # Documentación Babysitter App
           
           Bienvenido a la documentación completa del sistema de gestión de niñeras.
           
-          ## 🏗️ Arquitectura del Sistema
+          ## Arquitectura del Sistema
           
           - **Backend**: .NET Core 8.0 + Entity Framework + MySQL
           - **Frontend**: React 18 + TypeScript + Material-UI  
           - **Infraestructura**: Google Cloud Platform + Terraform
           - **CI/CD**: GitHub Actions
           
-          ## 📊 Diagramas Disponibles
+          ## Diagramas Disponibles
           
           ### Infraestructura
           - [Diagrama de Infraestructura](diagrams/terraform-graph.png)
@@ -99,7 +99,7 @@ jobs:
             - Sistema de reservas
             - Perfil de usuario
           
-          ## 🚀 Inicio Rápido
+          ## Inicio Rápido
           
           ### Desarrollo Local
           
@@ -157,7 +157,7 @@ jobs:
           <body>
               <div class="hero">
                   <div class="container text-center">
-                      <h1 class="display-4">📚 Babysitter App</h1>
+                      <h1 class="display-4">Babysitter App</h1>
                       <p class="lead">Documentación Completa del Sistema</p>
                   </div>
               </div>
@@ -167,7 +167,7 @@ jobs:
                       <div class="col-md-4 mb-4">
                           <div class="card h-100">
                               <div class="card-body">
-                                  <h5 class="card-title">🏗️ Infraestructura</h5>
+                                  <h5 class="card-title">Infraestructura</h5>
                                   <p class="card-text">Diagramas y documentación de la infraestructura en Google Cloud.</p>
                                   <a href="diagrams/terraform-graph.png" class="btn btn-primary">Ver Diagrama</a>
                               </div>
@@ -176,7 +176,7 @@ jobs:
                       <div class="col-md-4 mb-4">
                           <div class="card h-100">
                               <div class="card-body">
-                                  <h5 class="card-title">🔌 API Backend</h5>
+                                  <h5 class="card-title">API Backend</h5>
                                   <p class="card-text">Documentación de la API .NET Core y endpoints disponibles.</p>
                                   <a href="api/backend/" class="btn btn-primary">Ver Docs</a>
                               </div>
@@ -185,7 +185,7 @@ jobs:
                       <div class="col-md-4 mb-4">
                           <div class="card h-100">
                               <div class="card-body">
-                                  <h5 class="card-title">⚛️ Frontend</h5>
+                                  <h5 class="card-title">Frontend</h5>
                                   <p class="card-text">Documentación de componentes React y estructura del frontend.</p>
                                   <a href="api/frontend/" class="btn btn-primary">Ver Docs</a>
                               </div>
@@ -195,7 +195,7 @@ jobs:
                   
                   <div class="row mt-5">
                       <div class="col-md-6">
-                          <h3>📊 Diagramas Disponibles</h3>
+                          <h3>Diagramas Disponibles</h3>
                           <ul class="list-group">
                               <li class="list-group-item"><a href="diagrams/terraform-graph.png">Infraestructura GCP</a></li>
                               <li class="list-group-item"><a href="diagrams/backend-class-diagram.png">Clases Backend</a></li>
@@ -203,7 +203,7 @@ jobs:
                           </ul>
                       </div>
                       <div class="col-md-6">
-                          <h3>🚀 Enlaces Rápidos</h3>
+                          <h3>Enlaces Rápidos</h3>
                           <ul class="list-group">
                               <li class="list-group-item"><a href="https://github.com/UPT-FAING-EPIS/examen-2025-ii-pds-u1-Brunoenr02" target="_blank">Repositorio GitHub</a></li>
                               <li class="list-group-item"><a href="https://github.com/UPT-FAING-EPIS/examen-2025-ii-pds-u1-Brunoenr02/issues" target="_blank">Issues</a></li>
