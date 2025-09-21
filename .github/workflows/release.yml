@@ -2,15 +2,6 @@ name: 🏷️ Release Management
 on:
   push:
     branches: [main]
-    paths:
-      - 'frontend/**'
-      - 'backend/**'
-      - 'terraform/**'
-      - 'docs/**'
-      - 'README.md'
-      - 'CHANGELOG.md'
-      - 'package.json'
-      - '**/*.csproj'
   workflow_dispatch:
     inputs:
       release_type:

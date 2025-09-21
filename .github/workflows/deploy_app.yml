@@ -2,17 +2,8 @@ name: 🚀 Deploy Applications
 on:
   push:
     branches: [main]
-    paths:
-      - 'frontend/**'
-      - 'backend/**'
-      - 'docker-compose.yml'
-      - '.github/workflows/deploy_app.yml'
   pull_request:
     branches: [main]
-    paths:
-      - 'frontend/**'
-      - 'backend/**'
-      - 'docker-compose.yml'
   workflow_dispatch:
     inputs:
       deploy_frontend:

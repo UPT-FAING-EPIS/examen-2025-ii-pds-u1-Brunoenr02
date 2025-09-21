@@ -9,11 +9,6 @@ name: Deploy Applications
 on:
   push:
     branches: [main]
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - '.github/workflows/deploy.yml'
-      - 'Dockerfile*'
   workflow_dispatch:
     inputs:
       deploy_target:
