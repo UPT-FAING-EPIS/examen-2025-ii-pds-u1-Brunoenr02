@@ -111,7 +111,12 @@ jobs:
           mkdir -p docs/diagrams
           cp terraform/terraform-graph.png docs/diagrams/
           cp terraform/infra-docs.md docs/
+          
+          # Obtener los últimos cambios para evitar conflictos
+          git pull --rebase || true
+          
           git add docs/diagrams/terraform-graph.png docs/infra-docs.md
+          
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
@@ -121,6 +126,25 @@ jobs:
             - Documentación de Terraform actualizada
             
             [skip ci]"
-            git push
-            echo "✅ Diagrams updated successfully!"
+            
+            # Intentar push con reintentos en caso de fallo
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if git push; then
+                echo "✅ Push exitoso"
+                break
+              else
+                RETRY_COUNT=$((RETRY_COUNT+1))
+                echo "Push fallido, reintento $RETRY_COUNT de $MAX_RETRIES"
+                git pull --rebase || true
+                sleep 5
+              fi
+            done
+            
+            if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+              echo "❌ No se pudo hacer push después de $MAX_RETRIES intentos"
+              exit 1
+            fi
           fi
