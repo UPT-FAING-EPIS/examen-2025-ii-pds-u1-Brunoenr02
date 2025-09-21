@@ -1,4 +1,4 @@
-# 👶 Sistema de Alquiler de Niñeras
+# Sistema de Alquiler de Niñeras
 
 ## 🎯 Descripción
 Plataforma web completa que conecta a familias con niñeras calificadas, permitiendo la búsqueda, reserva y gestión de servicios de cuidado infantil de manera segura y eficiente.
