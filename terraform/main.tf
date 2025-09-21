@@ -86,6 +86,13 @@ resource "google_artifact_registry_repository" "babysitter_repo" {
   description   = "Docker repository for Babysitter application"
   format        = "DOCKER"
   depends_on    = [google_project_service.services]
+  
+  # Handle existing repository
+  lifecycle {
+    ignore_changes = [
+      description,
+    ]
+  }
 }
 
 # ============================================================================
