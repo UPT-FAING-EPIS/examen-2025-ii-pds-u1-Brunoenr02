@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend/BabysitterApi
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
+      - ASPNETCORE_URLS=${ASPNETCORE_URLS:-http://+:5000}
+      - ConnectionStrings__DefaultConnection=Server=${DB_SERVER};Database=${DB_NAME};Uid=${DB_USER};Pwd=${DB_PASSWORD};SslMode=Required;
+      - Jwt__Key=${JWT_SECRET_KEY}
+      - Jwt__Issuer=${JWT_ISSUER}
+      - Jwt__Audience=${JWT_AUDIENCE}
+    env_file:
+      - .env
+    networks:
+      - babysitter-network
+
+  frontend:
+    build:
+      context: ./frontend/babysitter-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - babysitter-network
+
+networks:
+  babysitter-network:
+    driver: bridge
