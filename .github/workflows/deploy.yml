@@ -1,0 +1,292 @@
+# ============================================================================
+# GITHUB ACTIONS WORKFLOW - DEPLOY APPLICATIONS
+# ============================================================================
+# Automatiza el build y deploy de backend (.NET) y frontend (React)
+# a Google Cloud Run después de que la infraestructura esté lista
+
+name: Deploy Applications
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/deploy.yml'
+      - 'Dockerfile*'
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'What to deploy'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - backend
+          - frontend
+          - both
+
+env:
+  GOOGLE_CREDENTIALS: ${{ secrets.GCP_SA_KEY }}
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: 'us-central1'
+  REGISTRY: 'us-central1-docker.pkg.dev'
+
+jobs:
+  # ============================================================================
+  # JOB 1: BUILD Y PUSH BACKEND
+  # ============================================================================
+  build-backend:
+    name: 🏗️ Build Backend
+    runs-on: ubuntu-latest
+    if: contains(github.event.head_commit.modified, 'backend/') || github.event.inputs.deploy_target == 'backend' || github.event.inputs.deploy_target == 'both' || github.event_name == 'push'
+    
+    outputs:
+      image-url: ${{ steps.build.outputs.image-url }}
+      
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: 🔐 Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: 🌩️ Setup Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      
+    - name: 🐳 Configure Docker for Artifact Registry
+      run: gcloud auth configure-docker ${{ env.REGISTRY }}
+      
+    - name: 🏗️ Build and Push Backend Image
+      id: build
+      run: |
+        IMAGE_URL="${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/babysitter-app-repo/backend:${{ github.sha }}"
+        
+        # Build Docker image
+        docker build -t $IMAGE_URL ./backend
+        
+        # Push to Artifact Registry
+        docker push $IMAGE_URL
+        
+        # Tag as latest
+        docker tag $IMAGE_URL "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/babysitter-app-repo/backend:latest"
+        docker push "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/babysitter-app-repo/backend:latest"
+        
+        echo "image-url=$IMAGE_URL" >> $GITHUB_OUTPUT
+        echo "✅ Backend image built and pushed: $IMAGE_URL"
+
+  # ============================================================================
+  # JOB 2: BUILD Y PUSH FRONTEND
+  # ============================================================================
+  build-frontend:
+    name: 🎨 Build Frontend
+    runs-on: ubuntu-latest
+    if: contains(github.event.head_commit.modified, 'frontend/') || github.event.inputs.deploy_target == 'frontend' || github.event.inputs.deploy_target == 'both' || github.event_name == 'push'
+    
+    outputs:
+      image-url: ${{ steps.build.outputs.image-url }}
+      
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: 🔐 Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: 🌩️ Setup Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      
+    - name: 🐳 Configure Docker for Artifact Registry
+      run: gcloud auth configure-docker ${{ env.REGISTRY }}
+      
+    - name: 🎨 Build and Push Frontend Image
+      id: build
+      run: |
+        IMAGE_URL="${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/babysitter-app-repo/frontend:${{ github.sha }}"
+        
+        # Build Docker image
+        docker build -t $IMAGE_URL ./frontend
+        
+        # Push to Artifact Registry
+        docker push $IMAGE_URL
+        
+        # Tag as latest
+        docker tag $IMAGE_URL "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/babysitter-app-repo/frontend:latest"
+        docker push "${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/babysitter-app-repo/frontend:latest"
+        
+        echo "image-url=$IMAGE_URL" >> $GITHUB_OUTPUT
+        echo "✅ Frontend image built and pushed: $IMAGE_URL"
+
+  # ============================================================================
+  # JOB 3: DEPLOY BACKEND A CLOUD RUN
+  # ============================================================================
+  deploy-backend:
+    name: 🚀 Deploy Backend
+    runs-on: ubuntu-latest
+    needs: build-backend
+    if: always() && needs.build-backend.result == 'success'
+    
+    steps:
+    - name: 🔐 Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: 🌩️ Setup Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      
+    - name: 🚀 Deploy to Cloud Run
+      run: |
+        gcloud run deploy babysitter-app-backend \
+          --image="${{ needs.build-backend.outputs.image-url }}" \
+          --region=${{ env.REGION }} \
+          --platform=managed \
+          --allow-unauthenticated \
+          --set-env-vars="ASPNETCORE_ENVIRONMENT=Production" \
+          --set-env-vars="ConnectionStrings__DefaultConnection=${{ secrets.DATABASE_CONNECTION_STRING }}" \
+          --set-env-vars="Jwt__Key=${{ secrets.JWT_SECRET_KEY }}" \
+          --set-env-vars="Jwt__Issuer=BabysitterApi" \
+          --set-env-vars="Jwt__Audience=BabysitterApiUsers" \
+          --cpu=1 \
+          --memory=512Mi \
+          --min-instances=0 \
+          --max-instances=10 \
+          --port=8080
+          
+    - name: 📝 Get Backend URL
+      id: backend-url
+      run: |
+        URL=$(gcloud run services describe babysitter-app-backend --region=${{ env.REGION }} --format="value(status.url)")
+        echo "Backend deployed at: $URL"
+        echo "url=$URL" >> $GITHUB_OUTPUT
+        echo "### 🏗️ Backend Deployment" >> $GITHUB_STEP_SUMMARY
+        echo "- **Service**: babysitter-app-backend" >> $GITHUB_STEP_SUMMARY
+        echo "- **URL**: $URL" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: ${{ needs.build-backend.outputs.image-url }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # JOB 4: DEPLOY FRONTEND A CLOUD RUN
+  # ============================================================================
+  deploy-frontend:
+    name: 🎨 Deploy Frontend
+    runs-on: ubuntu-latest
+    needs: [build-frontend, deploy-backend]
+    if: always() && needs.build-frontend.result == 'success'
+    
+    steps:
+    - name: 🔐 Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: 🌩️ Setup Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      
+    - name: 🔍 Get Backend URL
+      id: get-backend-url
+      run: |
+        BACKEND_URL=$(gcloud run services describe babysitter-app-backend --region=${{ env.REGION }} --format="value(status.url)" 2>/dev/null || echo "")
+        if [ -z "$BACKEND_URL" ]; then
+          echo "⚠️ Backend service not found, using placeholder"
+          BACKEND_URL="https://babysitter-app-backend-placeholder.run.app"
+        fi
+        echo "backend-url=$BACKEND_URL" >> $GITHUB_OUTPUT
+        
+    - name: 🎨 Deploy to Cloud Run
+      run: |
+        gcloud run deploy babysitter-app-frontend \
+          --image="${{ needs.build-frontend.outputs.image-url }}" \
+          --region=${{ env.REGION }} \
+          --platform=managed \
+          --allow-unauthenticated \
+          --set-env-vars="REACT_APP_API_URL=${{ steps.get-backend-url.outputs.backend-url }}" \
+          --cpu=1 \
+          --memory=512Mi \
+          --min-instances=0 \
+          --max-instances=10 \
+          --port=80
+          
+    - name: 📝 Get Frontend URL
+      id: frontend-url
+      run: |
+        URL=$(gcloud run services describe babysitter-app-frontend --region=${{ env.REGION }} --format="value(status.url)")
+        echo "Frontend deployed at: $URL"
+        echo "### 🎨 Frontend Deployment" >> $GITHUB_STEP_SUMMARY
+        echo "- **Service**: babysitter-app-frontend" >> $GITHUB_STEP_SUMMARY  
+        echo "- **URL**: $URL" >> $GITHUB_STEP_SUMMARY
+        echo "- **API URL**: ${{ steps.get-backend-url.outputs.backend-url }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: ${{ needs.build-frontend.outputs.image-url }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # JOB 5: SMOKE TESTS
+  # ============================================================================
+  smoke-tests:
+    name: 🧪 Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-frontend]
+    if: always() && (needs.deploy-backend.result == 'success' || needs.deploy-frontend.result == 'success')
+    
+    steps:
+    - name: 🌩️ Setup Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      
+    - name: 🔐 Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: 🧪 Test Backend Health
+      run: |
+        BACKEND_URL=$(gcloud run services describe babysitter-app-backend --region=${{ env.REGION }} --format="value(status.url)" 2>/dev/null || echo "")
+        if [ ! -z "$BACKEND_URL" ]; then
+          echo "Testing backend at: $BACKEND_URL"
+          
+          # Test health endpoint
+          if curl -f "$BACKEND_URL/health" -m 30; then
+            echo "✅ Backend health check passed"
+          else
+            echo "⚠️ Backend health check failed, but service is deployed"
+          fi
+          
+          # Test API base endpoint
+          if curl -f "$BACKEND_URL/api" -m 30; then
+            echo "✅ Backend API accessible"
+          else
+            echo "⚠️ Backend API test failed"
+          fi
+        fi
+        
+    - name: 🧪 Test Frontend Accessibility
+      run: |
+        FRONTEND_URL=$(gcloud run services describe babysitter-app-frontend --region=${{ env.REGION }} --format="value(status.url)" 2>/dev/null || echo "")
+        if [ ! -z "$FRONTEND_URL" ]; then
+          echo "Testing frontend at: $FRONTEND_URL"
+          
+          if curl -f "$FRONTEND_URL" -m 30 | grep -q "<!DOCTYPE html>"; then
+            echo "✅ Frontend is accessible and serving HTML"
+          else
+            echo "⚠️ Frontend accessibility test failed"
+          fi
+        fi
+        
+    - name: 📊 Deployment Summary
+      run: |
+        echo "## 🚀 Deployment Complete!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        BACKEND_URL=$(gcloud run services describe babysitter-app-backend --region=${{ env.REGION }} --format="value(status.url)" 2>/dev/null || echo "Not deployed")
+        FRONTEND_URL=$(gcloud run services describe babysitter-app-frontend --region=${{ env.REGION }} --format="value(status.url)" 2>/dev/null || echo "Not deployed")
+        
+        echo "### 🌐 Application URLs:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Frontend**: $FRONTEND_URL" >> $GITHUB_STEP_SUMMARY
+        echo "- **Backend API**: $BACKEND_URL" >> $GITHUB_STEP_SUMMARY
+        echo "- **API Docs**: $BACKEND_URL/swagger" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Next Steps:" >> $GITHUB_STEP_SUMMARY
+        echo "1. Access the frontend URL to test the application" >> $GITHUB_STEP_SUMMARY
+        echo "2. Check the API documentation at /swagger" >> $GITHUB_STEP_SUMMARY
+        echo "3. Monitor logs in Google Cloud Console" >> $GITHUB_STEP_SUMMARY

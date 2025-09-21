@@ -1,0 +1,275 @@
+# ============================================================================
+# GITHUB ACTIONS WORKFLOW - INFRAESTRUCTURA TERRAFORM
+# ============================================================================
+# Automatiza el deployment de infraestructura en Google Cloud Platform
+# usando Terraform cuando hay cambios en la rama main
+
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/infra.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform Action'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+env:
+  TF_VERSION: '1.5.0'
+  GOOGLE_CREDENTIALS: ${{ secrets.GCP_SA_KEY }}
+  TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+  TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
+  TF_VAR_jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
+
+jobs:
+  # ============================================================================
+  # JOB 1: VALIDAR TERRAFORM
+  # ============================================================================
+  validate:
+    name: 🔍 Validate Terraform
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: 🔧 Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+        
+    - name: 🔍 Terraform Format Check
+      run: |
+        cd terraform
+        terraform fmt -check
+        
+    - name: ✅ Terraform Validate
+      run: |
+        cd terraform
+        terraform init -backend=false
+        terraform validate
+
+  # ============================================================================
+  # JOB 2: PLAN TERRAFORM (Siempre se ejecuta)
+  # ============================================================================
+  plan:
+    name: 📋 Plan Infrastructure
+    runs-on: ubuntu-latest
+    needs: validate
+    
+    outputs:
+      tfplanExitCode: ${{ steps.tf-plan.outputs.exitcode }}
+      
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: 🔧 Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+        
+    - name: 🔐 Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: 🌩️ Setup Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      
+    - name: 🚀 Terraform Init
+      run: |
+        cd terraform
+        terraform init
+        
+    - name: 📋 Terraform Plan
+      id: tf-plan
+      run: |
+        cd terraform
+        export exitcode=0
+        terraform plan -detailed-exitcode -no-color -out tfplan || export exitcode=$?
+        
+        echo "exitcode=$exitcode" >> $GITHUB_OUTPUT
+        
+        if [ $exitcode -eq 1 ]; then
+          echo "❌ Terraform Plan Failed"
+          exit 1
+        elif [ $exitcode -eq 0 ]; then
+          echo "✅ No changes detected"
+        elif [ $exitcode -eq 2 ]; then
+          echo "✅ Changes detected"
+        else 
+          echo "❌ Unexpected exit code: $exitcode"
+          exit 1
+        fi
+        
+    - name: 📝 Publish Terraform Plan
+      uses: actions/github-script@v7
+      if: github.event_name == 'pull_request'
+      env:
+        PLAN: "terraform\n${{ steps.tf-plan.outputs.stdout }}"
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const output = `#### 🌩️ Terraform Plan 📋
+          
+          <details><summary>Show Plan</summary>
+          
+          \`\`\`\n
+          ${process.env.PLAN}
+          \`\`\`
+          
+          </details>
+          
+          *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: output
+          })
+          
+    - name: 💾 Cache Terraform Plan
+      uses: actions/cache@v3
+      with:
+        path: terraform/tfplan
+        key: tfplan-${{ github.sha }}
+
+  # ============================================================================
+  # JOB 3: APPLY TERRAFORM (Solo en main o manual)
+  # ============================================================================
+  apply:
+    name: 🚀 Deploy Infrastructure
+    runs-on: ubuntu-latest
+    needs: plan
+    if: github.ref == 'refs/heads/main' && needs.plan.outputs.tfplanExitCode == 2
+    environment: production
+    
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: 🔧 Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+        
+    - name: 🔐 Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: 🌩️ Setup Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      
+    - name: 🚀 Terraform Init
+      run: |
+        cd terraform
+        terraform init
+        
+    - name: 💾 Restore Terraform Plan
+      uses: actions/cache@v3
+      with:
+        path: terraform/tfplan
+        key: tfplan-${{ github.sha }}
+        
+    - name: 🚀 Terraform Apply
+      run: |
+        cd terraform
+        terraform apply -auto-approve tfplan
+        
+    - name: 📊 Output Infrastructure Info
+      id: tf-output
+      run: |
+        cd terraform
+        echo "## 🌩️ Infrastructure Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Deployment Summary:" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Backend URL
+        BACKEND_URL=$(terraform output -raw backend_url)
+        echo "- **Backend URL**: $BACKEND_URL" >> $GITHUB_STEP_SUMMARY
+        
+        # Frontend URL  
+        FRONTEND_URL=$(terraform output -raw frontend_url)
+        echo "- **Frontend URL**: $FRONTEND_URL" >> $GITHUB_STEP_SUMMARY
+        
+        # Database Info
+        DB_NAME=$(terraform output -raw database_instance_name)
+        echo "- **Database**: $DB_NAME" >> $GITHUB_STEP_SUMMARY
+        
+        # Artifact Registry
+        REGISTRY_URL=$(terraform output -raw artifact_registry_repository_url)
+        echo "- **Docker Registry**: $REGISTRY_URL" >> $GITHUB_STEP_SUMMARY
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🐳 Next Steps:" >> $GITHUB_STEP_SUMMARY
+        echo "1. Build and push Docker images" >> $GITHUB_STEP_SUMMARY
+        echo "2. Deploy applications to Cloud Run" >> $GITHUB_STEP_SUMMARY
+        echo "3. Run database migrations" >> $GITHUB_STEP_SUMMARY
+        
+        # Set outputs for other jobs
+        echo "backend_url=$BACKEND_URL" >> $GITHUB_OUTPUT
+        echo "frontend_url=$FRONTEND_URL" >> $GITHUB_OUTPUT
+        echo "registry_url=$REGISTRY_URL" >> $GITHUB_OUTPUT
+
+  # ============================================================================
+  # JOB 4: DESTROY TERRAFORM (Solo manual)
+  # ============================================================================
+  destroy:
+    name: 💥 Destroy Infrastructure
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event.inputs.action == 'destroy'
+    environment: production
+    
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: 🔧 Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+        
+    - name: 🔐 Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: 🌩️ Setup Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      
+    - name: 🚀 Terraform Init
+      run: |
+        cd terraform
+        terraform init
+        
+    - name: 💥 Terraform Destroy
+      run: |
+        cd terraform
+        terraform plan -destroy -out=tfplan-destroy
+        terraform apply -auto-approve tfplan-destroy
+        
+    - name: ⚠️ Destruction Complete
+      run: |
+        echo "## ⚠️ Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "All Google Cloud resources have been destroyed." >> $GITHUB_STEP_SUMMARY
+        echo "This action is irreversible." >> $GITHUB_STEP_SUMMARY
