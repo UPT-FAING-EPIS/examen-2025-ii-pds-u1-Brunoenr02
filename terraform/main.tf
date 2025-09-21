@@ -1,6 +1,8 @@
 # ============================================================================
 # BABYSITTER RENTAL SYSTEM - TERRAFORM CONFIGURATION FOR GOOGLE CLOUD
 # ============================================================================
+# Version: 1.0.0
+# Deploy trigger: 2025-09-21
 
 # Configuración del proveedor de Google Cloud
 provider "google" {

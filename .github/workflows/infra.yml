@@ -157,7 +157,7 @@ jobs:
     name: 🚀 Deploy Infrastructure
     runs-on: ubuntu-latest
     needs: plan
-    if: github.ref == 'refs/heads/main' && needs.plan.outputs.tfplanExitCode == 2
+    if: github.ref == 'refs/heads/main' && (needs.plan.outputs.tfplanExitCode == 2 || needs.plan.outputs.tfplanExitCode == 0 || github.event.inputs.action == 'apply')
     environment: production
     
     steps:
