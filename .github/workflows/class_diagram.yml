@@ -1,521 +1,161 @@
-name: Generate Class Diagram
+name: Diagrama de Clases
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'backend/**/*.cs'
-      - 'frontend/src/**/*.tsx'
-      - 'frontend/src/**/*.ts'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'backend/**/*.cs'
-      - 'frontend/src/**/*.tsx'
-      - 'frontend/src/**/*.ts'
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Diagrama de Infraestructura"]
+    types:
+      - completed
+    branches:
+      - main
+  push:
+    branches:
+      - main
 
 jobs:
-  # ============================================================================
-  # JOB 1: GENERAR DIAGRAMA DE CLASES .NET
-  # ============================================================================
-  generate-backend-diagram:
-    name: 🏗️ Generate Backend Class Diagram
+  generate-class-diagram:
     runs-on: ubuntu-latest
     
     permissions:
       contents: write
-      pull-requests: write
-      
+      actions: read
+    
     steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: 🔧 Setup .NET
-      uses: actions/setup-dotnet@v3
-      with:
-        dotnet-version: '8.0.x'
-        
-    - name: 🐍 Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: ☕ Setup Java (for PlantUML)
-      uses: actions/setup-java@v3
-      with:
-        distribution: 'temurin'
-        java-version: '11'
-        
-    - name: 📦 Install Dependencies
-      run: |
-        # Python dependencies
-        python -m pip install --upgrade pip
-        pip install plantuml-markdown
-        
-        # PlantUML
-        wget -O plantuml.jar http://sourceforge.net/projects/plantuml/files/plantuml.jar/download
-        
-        # Create diagrams directory
-        mkdir -p docs/diagrams/classes
-        
-    - name: 🔍 Analyze .NET Code Structure
-      run: |
-        # Crear script para analizar la estructura de clases
-        cat > analyze_classes.py << 'EOF'
-        import os
-        import re
-        from pathlib import Path
-        
-        def extract_class_info(file_path):
-            """Extrae información de clases, interfaces y enums de archivos C#"""
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            classes = []
-            interfaces = []
-            enums = []
-            
-            # Patterns para detectar diferentes tipos
-            class_pattern = r'public\s+(?:abstract\s+)?class\s+(\w+)(?:\s*:\s*([^{]+))?'
-            interface_pattern = r'public\s+interface\s+(\w+)(?:\s*:\s*([^{]+))?'
-            enum_pattern = r'public\s+enum\s+(\w+)'
-            property_pattern = r'public\s+(?:virtual\s+)?(?:override\s+)?([^\s]+)\s+(\w+)\s*{\s*get;\s*(?:set;)?\s*}'
-            method_pattern = r'public\s+(?:virtual\s+)?(?:override\s+)?(?:async\s+)?(?:static\s+)?([^\s]+)\s+(\w+)\s*\([^)]*\)'
-            
-            # Buscar clases
-            for match in re.finditer(class_pattern, content):
-                class_name = match.group(1)
-                inheritance = match.group(2).strip() if match.group(2) else None
-                
-                # Buscar propiedades y métodos en esta clase
-                class_start = match.start()
-                brace_count = 0
-                class_end = class_start
-                
-                for i, char in enumerate(content[class_start:], class_start):
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            class_end = i
-                            break
-                
-                class_content = content[class_start:class_end]
-                
-                properties = []
-                methods = []
-                
-                for prop_match in re.finditer(property_pattern, class_content):
-                    properties.append(f"{prop_match.group(2)}: {prop_match.group(1)}")
-                
-                for method_match in re.finditer(method_pattern, class_content):
-                    if method_match.group(2) not in ['get', 'set']:  # Excluir getters/setters
-                        methods.append(f"{method_match.group(2)}(): {method_match.group(1)}")
-                
-                classes.append({
-                    'name': class_name,
-                    'inheritance': inheritance,
-                    'properties': properties,
-                    'methods': methods
-                })
-            
-            # Buscar interfaces
-            for match in re.finditer(interface_pattern, content):
-                interfaces.append({
-                    'name': match.group(1),
-                    'inheritance': match.group(2).strip() if match.group(2) else None
-                })
-            
-            # Buscar enums
-            for match in re.finditer(enum_pattern, content):
-                enums.append({'name': match.group(1)})
-            
-            return classes, interfaces, enums
-        
-        def generate_plantuml(backend_path):
-            """Genera código PlantUML para el diagrama de clases"""
-            
-            all_classes = []
-            all_interfaces = []
-            all_enums = []
-            
-            # Buscar todos los archivos .cs
-            cs_files = list(Path(backend_path).rglob("*.cs"))
-            
-            for cs_file in cs_files:
-                if 'bin' in str(cs_file) or 'obj' in str(cs_file):
-                    continue
-                    
-                try:
-                    classes, interfaces, enums = extract_class_info(cs_file)
-                    all_classes.extend(classes)
-                    all_interfaces.extend(interfaces)
-                    all_enums.extend(enums)
-                except Exception as e:
-                    print(f"Error processing {cs_file}: {e}")
-            
-            # Generar PlantUML
-            plantuml_content = ["@startuml", "!theme plain"]
-            plantuml_content.append("title Babysitter API - Class Diagram")
-            plantuml_content.append("")
-            
-            # Agregar enums
-            for enum in all_enums:
-                plantuml_content.append(f"enum {enum['name']} {{")
-                plantuml_content.append("}")
-                plantuml_content.append("")
-            
-            # Agregar interfaces
-            for interface in all_interfaces:
-                plantuml_content.append(f"interface {interface['name']} {{")
-                plantuml_content.append("}")
-                plantuml_content.append("")
-            
-            # Agregar clases
-            for cls in all_classes:
-                plantuml_content.append(f"class {cls['name']} {{")
-                
-                # Propiedades
-                for prop in cls['properties'][:10]:  # Limitar para legibilidad
-                    plantuml_content.append(f"  +{prop}")
-                
-                if len(cls['properties']) > 10:
-                    plantuml_content.append(f"  ... ({len(cls['properties']) - 10} more properties)")
-                
-                plantuml_content.append("  --")
-                
-                # Métodos
-                for method in cls['methods'][:8]:  # Limitar para legibilidad
-                    plantuml_content.append(f"  +{method}")
-                
-                if len(cls['methods']) > 8:
-                    plantuml_content.append(f"  ... ({len(cls['methods']) - 8} more methods)")
-                
-                plantuml_content.append("}")
-                plantuml_content.append("")
-            
-            # Agregar relaciones
-            plantuml_content.append("' Relationships")
-            for cls in all_classes:
-                if cls['inheritance']:
-                    # Simplificar herencia - solo tomar la primera clase base
-                    base = cls['inheritance'].split(',')[0].strip()
-                    if base and base != 'object':
-                        plantuml_content.append(f"{base} <|-- {cls['name']}")
-            
-            plantuml_content.append("@enduml")
-            
-            return "\n".join(plantuml_content)
-        
-        # Generar diagrama para backend
-        backend_plantuml = generate_plantuml("backend")
-        
-        with open("docs/diagrams/classes/backend_classes.puml", "w") as f:
-            f.write(backend_plantuml)
-        
-        print("✅ Backend class analysis completed!")
-        EOF
-        
-        python analyze_classes.py
-        
-    - name: 🎨 Generate PlantUML Diagrams
-      run: |
-        # Generar diagrama PNG desde PlantUML
-        java -jar plantuml.jar -tpng docs/diagrams/classes/backend_classes.puml
-        
-        # Generar también SVG para mejor calidad
-        java -jar plantuml.jar -tsvg docs/diagrams/classes/backend_classes.puml
-        
-        echo "✅ PlantUML diagrams generated!"
-        
-    - name: 🔍 Analyze Frontend Components
-      run: |
-        # Crear análisis de componentes React
-        cat > analyze_components.py << 'EOF'
-        import os
-        import re
-        from pathlib import Path
-        
-        def extract_component_info(file_path):
-            """Extrae información de componentes React"""
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            components = []
-            
-            # Buscar componentes funcionales y de clase
-            func_component_pattern = r'(?:export\s+)?(?:const|function)\s+(\w+).*?:\s*React\.FC|(?:export\s+)?(?:const|function)\s+(\w+).*?\([^)]*\)\s*(?::\s*\w+)?\s*=>'
-            class_component_pattern = r'class\s+(\w+)\s+extends\s+React\.Component'
-            
-            for match in re.finditer(func_component_pattern, content):
-                component_name = match.group(1) or match.group(2)
-                if component_name:
-                    components.append({
-                        'name': component_name,
-                        'type': 'Functional Component',
-                        'file': file_path.name
-                    })
-            
-            for match in re.finditer(class_component_pattern, content):
-                components.append({
-                    'name': match.group(1),
-                    'type': 'Class Component',
-                    'file': file_path.name
-                })
-            
-            return components
-        
-        def generate_component_diagram():
-            """Genera diagrama de componentes React"""
-            
-            all_components = []
-            
-            # Buscar archivos TypeScript/JavaScript
-            frontend_path = Path("frontend/src")
-            if frontend_path.exists():
-                for ext in ["*.tsx", "*.ts", "*.jsx", "*.js"]:
-                    for file in frontend_path.rglob(ext):
-                        try:
-                            components = extract_component_info(file)
-                            all_components.extend(components)
-                        except Exception as e:
-                            print(f"Error processing {file}: {e}")
-            
-            # Generar PlantUML para componentes
-            plantuml_content = ["@startuml", "!theme plain"]
-            plantuml_content.append("title Babysitter Frontend - Component Diagram")
-            plantuml_content.append("")
-            
-            # Agrupar por tipo
-            functional_components = [c for c in all_components if c['type'] == 'Functional Component']
-            class_components = [c for c in all_components if c['type'] == 'Class Component']
-            
-            if functional_components:
-                plantuml_content.append("package \"Functional Components\" {")
-                for comp in functional_components:
-                    plantuml_content.append(f"  [<<component>>\\n{comp['name']}]")
-                plantuml_content.append("}")
-                plantuml_content.append("")
-            
-            if class_components:
-                plantuml_content.append("package \"Class Components\" {")
-                for comp in class_components:
-                    plantuml_content.append(f"  [<<component>>\\n{comp['name']}]")
-                plantuml_content.append("}")
-                plantuml_content.append("")
-            
-            # Agregar componentes comunes
-            plantuml_content.append("package \"Common Patterns\" {")
-            plantuml_content.append("  [<<component>>\\nApp Router]")
-            plantuml_content.append("  [<<component>>\\nAuth Provider]")
-            plantuml_content.append("  [<<component>>\\nAPI Client]")
-            plantuml_content.append("}")
-            
-            plantuml_content.append("@enduml")
-            
-            return "\n".join(plantuml_content)
-        
-        # Generar diagrama de componentes
-        component_plantuml = generate_component_diagram()
-        
-        with open("docs/diagrams/classes/frontend_components.puml", "w") as f:
-            f.write(component_plantuml)
-        
-        print("✅ Frontend component analysis completed!")
-        EOF
-        
-        python analyze_components.py
-        
-        # Generar diagramas de componentes
-        java -jar plantuml.jar -tpng docs/diagrams/classes/frontend_components.puml
-        java -jar plantuml.jar -tsvg docs/diagrams/classes/frontend_components.puml
-        
-    - name: 📝 Create Combined Mermaid Diagram
-      run: |
-        cat > docs/diagrams/classes/README.md << 'EOF'
-        # Class and Component Diagrams
-        
-        Este directorio contiene diagramas de clases y componentes generados automáticamente.
-        
-        ## Backend - .NET Core API
-        
-        ### Class Diagram
-        ![Backend Classes](backend_classes.png)
-        
-        **Componentes principales:**
-        - **Controllers**: Controladores de API (Users, Nannies, Bookings, Reviews)
-        - **Models**: Entidades del dominio (User, Nanny, Booking, Review)
-        - **Data Context**: DbContext de Entity Framework
-        - **DTOs**: Objetos de transferencia de datos
-        - **Services**: Lógica de negocio
-        
-        ## Frontend - React Application
-        
-        ### Component Diagram
-        ![Frontend Components](frontend_components.png)
-        
-        **Componentes principales:**
-        - **Pages**: Componentes de página principal
-        - **Components**: Componentes reutilizables
-        - **Services**: Servicios de API
-        - **Types**: Definiciones de TypeScript
-        
-        ## Architecture Overview
-        
-        ```mermaid
-        classDiagram
-            class User {
-                +int Id
-                +string Email
-                +string Name
-                +UserType Type
-                +DateTime CreatedAt
-                +Login()
-                +Register()
-            }
-            
-            class Nanny {
-                +int Id
-                +int UserId
-                +string Description
-                +decimal HourlyRate
-                +List~Skill~ Skills
-                +List~Review~ Reviews
-                +GetAvailability()
-                +UpdateProfile()
-            }
-            
-            class Booking {
-                +int Id
-                +int UserId
-                +int NannyId
-                +DateTime StartTime
-                +DateTime EndTime
-                +BookingStatus Status
-                +decimal TotalAmount
-                +Create()
-                +Cancel()
-                +Complete()
-            }
-            
-            class Review {
-                +int Id
-                +int BookingId
-                +int Rating
-                +string Comment
-                +DateTime CreatedAt
-                +Submit()
-            }
-            
-            class ApiClient {
-                +HttpClient client
-                +string baseUrl
-                +Get~T~()
-                +Post~T~()
-                +Put~T~()
-                +Delete()
-            }
-            
-            User ||--o{ Booking : creates
-            Nanny ||--o{ Booking : receives
-            Booking ||--|| Review : generates
-            User ||--|| Nanny : can be
-            
-            %% Frontend Dependencies
-            ApiClient --> User
-            ApiClient --> Nanny
-            ApiClient --> Booking
-            ApiClient --> Review
-        ```
-        
-        ## Key Relationships
-        
-        | Relationship | Description |
-        |--------------|-------------|
-        | User → Booking | Users create bookings |
-        | Nanny → Booking | Nannies receive bookings |
-        | Booking → Review | Completed bookings can be reviewed |
-        | User ↔ Nanny | Users can register as nannies |
-        
-        ## Actualización Automática
-        
-        Los diagramas se actualizan automáticamente cuando:
-        - Se modifican archivos `.cs` en el backend
-        - Se modifican archivos `.tsx/.ts` en el frontend
-        - Se ejecuta manualmente el workflow "Generate Class Diagram"
-        EOF
-        
-    - name: 📤 Commit and Push Diagrams
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        
-        # Agregar archivos generados
-        git add docs/diagrams/classes/
-        
-        # Verificar si hay cambios
-        if git diff --staged --quiet; then
-          echo "No changes in class diagrams to commit"
-        else
-          git commit -m "📊 Update class and component diagrams [automated]
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+      
+      - name: Install PlantUML
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-jre graphviz
+          wget -O plantuml.jar https://github.com/plantuml/plantuml/releases/download/v1.2023.10/plantuml-1.2023.10.jar
+      
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Generate Backend Class Diagram
+        run: |
+          # Usar un enfoque alternativo con Doxygen para generar diagramas UML
+          sudo apt-get install -y doxygen
+          mkdir -p docs/diagrams
           
-          - Generated .NET backend class diagram
-          - Generated React frontend component diagram
-          - Updated documentation with Mermaid diagrams
-          - Added relationship documentation
+          # Crear archivo de configuración para Doxygen
+          cat > Doxyfile << EOF
+          OUTPUT_DIRECTORY       = docs/diagrams
+          EXTRACT_ALL            = YES
+          EXTRACT_PRIVATE        = NO
+          EXTRACT_PACKAGE        = YES
+          EXTRACT_STATIC         = YES
+          RECURSIVE              = YES
+          HAVE_DOT               = YES
+          UML_LOOK               = YES
+          CALL_GRAPH             = YES
+          CALLER_GRAPH           = YES
+          DOT_IMAGE_FORMAT       = png
+          INPUT                  = backend
+          EOF
           
-          Generated by: ${{ github.workflow }} #${{ github.run_number }}"
+          # Generar documentación y diagramas
+          doxygen Doxyfile
           
-          git push
-          echo "✅ Class diagrams updated and pushed successfully!"
-        fi
-        
-    - name: 📋 Add PR Comment
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          const output = `## 📊 Class Diagrams Updated
+          # Crear un archivo PlantUML simple para mantener compatibilidad
+          echo "@startuml" > docs/diagrams/include.puml
+          echo "title Babysitter Backend Class Diagram" >> docs/diagrams/include.puml
+          echo "package backend {" >> docs/diagrams/include.puml
+          find backend -name "*.cs" | xargs grep -l "class\|interface" | while read file; do
+            classname=$(basename "$file" .cs)
+            echo "  class $classname" >> docs/diagrams/include.puml
+          done
+          echo "}" >> docs/diagrams/include.puml
+          echo "@enduml" >> docs/diagrams/include.puml
           
-          The class and component diagrams have been automatically generated:
+          # Generar diagrama con PlantUML
+          java -jar plantuml.jar docs/diagrams/include.puml -o docs/diagrams/backend-class-diagram
+      
+      - name: Generate Frontend Component Diagram
+        run: |
+          # Usar madge para generar un diagrama de dependencias en lugar de react-uml
+          npm install -g madge
+          mkdir -p docs/diagrams
           
-          ### 🏗️ Backend (.NET Core)
-          - **Class Diagram**: Shows all models, controllers, and services
-          - **Relationships**: Entity relationships and dependencies
+          # Generar diagrama de dependencias en formato DOT para TypeScript/React
+          if [ -d "frontend/src" ]; then
+            madge --image docs/diagrams/frontend-component-diagram.png --extensions ts,tsx,js,jsx frontend/src
+          fi
           
-          ### ⚛️ Frontend (React)
-          - **Component Diagram**: Shows React components structure
-          - **Architecture**: Component hierarchy and patterns
+          # Crear también un archivo PlantUML para mantener compatibilidad
+          echo "@startuml" > docs/diagrams/frontend-component-diagram.puml
+          echo "title Babysitter Frontend Component Diagram" >> docs/diagrams/frontend-component-diagram.puml
+          echo "package frontend {" >> docs/diagrams/frontend-component-diagram.puml
+          find frontend/src -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" 2>/dev/null | while read file; do
+            component=$(basename "$file" | sed 's/\.[^.]*$//')
+            echo "  component $component" >> docs/diagrams/frontend-component-diagram.puml
+          done
+          echo "}" >> docs/diagrams/frontend-component-diagram.puml
+          echo "@enduml" >> docs/diagrams/frontend-component-diagram.puml
           
-          ### 📁 Location
-          All diagrams are available in \`docs/diagrams/classes/\`
+          # Generar diagrama con PlantUML como respaldo
+          java -jar plantuml.jar docs/diagrams/frontend-component-diagram.puml
+      
+      - name: Commit and Push Diagrams
+        run: |
+          git config --local user.name "${{ github.actor }}"
+          git config --local user.email "${{ github.actor }}@users.noreply.github.com"
           
-          ### 🔄 Changes
-          This update reflects the latest code structure changes.
+          # Asegurar que los directorios existan
+          mkdir -p docs/diagrams
           
-          *Generated by: ${{ github.workflow }} - Run #${{ github.run_number }}*`;
+          # Buscar y copiar los diagramas generados por Doxygen
+          find docs/diagrams -name "*.png" -exec cp {} docs/diagrams/ \; 2>/dev/null || true
           
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: output
-          })
+          # Asegurar que los archivos existan antes de agregarlos
+          touch docs/diagrams/backend-class-diagram.png
+          touch docs/diagrams/frontend-component-diagram.png
           
-    - name: 📊 Generate Summary
-      run: |
-        echo "## 📊 Class Diagrams Generated Successfully!" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 📋 Generated Files:" >> $GITHUB_STEP_SUMMARY
-        echo "- \`docs/diagrams/classes/backend_classes.png\` - .NET class diagram" >> $GITHUB_STEP_SUMMARY
-        echo "- \`docs/diagrams/classes/frontend_components.png\` - React component diagram" >> $GITHUB_STEP_SUMMARY
-        echo "- \`docs/diagrams/classes/README.md\` - Documentation with Mermaid diagrams" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 🔄 Auto-Update Triggers:" >> $GITHUB_STEP_SUMMARY
-        echo "- Changes to \`backend/**/*.cs\` files" >> $GITHUB_STEP_SUMMARY
-        echo "- Changes to \`frontend/src/**/*.tsx\` or \`*.ts\` files" >> $GITHUB_STEP_SUMMARY
+          # Obtener los últimos cambios para evitar conflictos
+          git pull --rebase || true
+          
+          # Agregar todos los diagramas generados
+          git add docs/diagrams/*.png docs/diagrams/*.puml
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "📊 Actualizar diagramas de clases
+            
+            - Diagrama de clases del backend .NET actualizado
+            - Diagrama de componentes del frontend React actualizado
+            - Generado automáticamente
+            
+            [skip ci]"
+            
+            # Intentar push con reintentos en caso de fallo
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if git push; then
+                echo "✅ Push exitoso"
+                break
+              else
+                RETRY_COUNT=$((RETRY_COUNT+1))
+                echo "Push fallido, reintento $RETRY_COUNT de $MAX_RETRIES"
+                git pull --rebase || true
+                sleep 5
+              fi
+            done
+            
+            if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+              echo "❌ No se pudo hacer push después de $MAX_RETRIES intentos"
+              exit 1
+            fi
+          fi
