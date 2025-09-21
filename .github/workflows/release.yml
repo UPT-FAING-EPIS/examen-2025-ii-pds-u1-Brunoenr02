@@ -1,87 +1,170 @@
-name: Release Management
+name: Crear Releasename: Release Management
+
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      release_type:
-        description: 'Release Type'
-        required: true
-        default: 'patch'
-        type: choice
-        options:
-          - patch
+
+on:  push:
+
+  workflow_dispatch:    branches: [main]
+
+    inputs:  workflow_dispatch:
+
+      version:    inputs:
+
+        description: 'Versión del release (formato: x.y.z)'      release_type:
+
+        required: true        description: 'Release Type'
+
+  push:        required: true
+
+    branches:        default: 'patch'
+
+      - main        type: choice
+
+    tags:        options:
+
+      - 'v*'          - patch
+
           - minor
-          - major
-      pre_release:
-        description: 'Pre-release'
-        required: false
-        default: false
-        type: boolean
-      custom_version:
-        description: 'Custom Version (e.g., 1.2.3)'
-        required: false
-        type: string
 
-env:
-  GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
-  GOOGLE_CLOUD_REGION: us-central1
-  REGISTRY_URL: gcr.io
-  NODE_VERSION: '18'
-  DOTNET_VERSION: '8.0'
+jobs:          - major
 
-jobs:
-  # ============================================================================
-  # VERSION CALCULATION - Semantic Versioning
-  # ============================================================================
-  calculate-version:
-    name: Calculate Version
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      changelog: ${{ steps.changelog.outputs.changelog }}
-      is-release: ${{ steps.version.outputs.is-release }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+  build-and-release:      pre_release:
+
+    runs-on: ubuntu-latest        description: 'Pre-release'
+
+            required: false
+
+    steps:        default: false
+
+      - name: Checkout repo        type: boolean
+
+        uses: actions/checkout@v4      custom_version:
+
+        with:        description: 'Custom Version (e.g., 1.2.3)'
+
+          fetch-depth: 0        required: false
+
+              type: string
+
+      - name: Setup .NET
+
+        uses: actions/setup-dotnet@v4env:
+
+        with:  GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+
+          dotnet-version: '8.x'  GOOGLE_CLOUD_REGION: us-central1
+
+        REGISTRY_URL: gcr.io
+
+      - name: Setup Node.js  NODE_VERSION: '18'
+
+        uses: actions/setup-node@v4  DOTNET_VERSION: '8.0'
+
         with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: '20'jobs:
 
-      - name: Install semantic-release
-        run: |
-          npm install -g semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github
+        # ============================================================================
 
-      - name: Calculate next version
-        id: version
-        run: |
-          # Get current version from git tags
-          CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          CURRENT_VERSION=${CURRENT_VERSION#v}
-          
-          echo "Current version: $CURRENT_VERSION"
-          
-          # Handle manual workflow dispatch
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ -n "${{ github.event.inputs.custom_version }}" ]; then
-              NEW_VERSION="${{ github.event.inputs.custom_version }}"
-            else
-              # Parse current version
-              IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
-              MAJOR=${VERSION_PARTS[0]:-0}
-              MINOR=${VERSION_PARTS[1]:-0}
-              PATCH=${VERSION_PARTS[2]:-0}
-              
-              case "${{ github.event.inputs.release_type }}" in
-                major)
-                  NEW_VERSION="$((MAJOR + 1)).0.0"
-                  ;;
-                minor)
+      - name: Build Backend  # VERSION CALCULATION - Semantic Versioning
+
+        run: |  # ============================================================================
+
+          cd backend/BabysitterApi  calculate-version:
+
+          dotnet restore    name: Calculate Version
+
+          dotnet build --configuration Release    runs-on: ubuntu-latest
+
+          dotnet publish -c Release -o ../../publish/backend    outputs:
+
+            version: ${{ steps.version.outputs.version }}
+
+      - name: Build Frontend      changelog: ${{ steps.changelog.outputs.changelog }}
+
+        run: |      is-release: ${{ steps.version.outputs.is-release }}
+
+          cd frontend    steps:
+
+          npm ci      - name: Checkout code
+
+          # Desactivar el tratamiento de advertencias como errores        uses: actions/checkout@v4
+
+          export CI=false        with:
+
+          npm run build          fetch-depth: 0
+
+          mkdir -p ../publish/frontend          token: ${{ secrets.GITHUB_TOKEN }}
+
+          cp -r build/* ../publish/frontend/
+
+            - name: Set up Node.js
+
+      - name: Create Release ZIP        uses: actions/setup-node@v4
+
+        run: |        with:
+
+          mkdir -p artifacts          node-version: ${{ env.NODE_VERSION }}
+
+          zip -r artifacts/backend.zip publish/backend/
+
+          zip -r artifacts/frontend.zip publish/frontend/      - name: Install semantic-release
+
+          if [ -d "k8s" ]; then        run: |
+
+            zip -r artifacts/k8s-manifests.zip k8s/          npm install -g semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github
+
+          fi
+
+          if [ -d "infra" ]; then      - name: Calculate next version
+
+            zip -r artifacts/infra.zip infra/        id: version
+
+          fi        run: |
+
+                # Get current version from git tags
+
+      - name: Generate Release Notes          CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+
+        run: |          CURRENT_VERSION=${CURRENT_VERSION#v}
+
+          echo "# Release ${{ github.event.inputs.version || github.ref_name }}" > RELEASE_NOTES.md          
+
+          echo "## Cambios en esta versión" >> RELEASE_NOTES.md          echo "Current version: $CURRENT_VERSION"
+
+          git log $(git describe --tags --abbrev=0 2>/dev/null || echo HEAD~10)..HEAD --pretty=format:"* %s" >> RELEASE_NOTES.md          
+
+                # Handle manual workflow dispatch
+
+      - name: Create GitHub Release          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+
+        uses: softprops/action-gh-release@v1            if [ -n "${{ github.event.inputs.custom_version }}" ]; then
+
+        with:              NEW_VERSION="${{ github.event.inputs.custom_version }}"
+
+          files: |            else
+
+            artifacts/backend.zip              # Parse current version
+
+            artifacts/frontend.zip              IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+
+            artifacts/k8s-manifests.zip              MAJOR=${VERSION_PARTS[0]:-0}
+
+            artifacts/infra.zip              MINOR=${VERSION_PARTS[1]:-0}
+
+          body_path: RELEASE_NOTES.md              PATCH=${VERSION_PARTS[2]:-0}
+
+          draft: false              
+
+          prerelease: false              case "${{ github.event.inputs.release_type }}" in
+
+          name: Release ${{ github.event.inputs.version || github.ref_name }}                major)
+
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}                  NEW_VERSION="$((MAJOR + 1)).0.0"
+
+        env:                  ;;
+
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}                minor)
                   NEW_VERSION="$MAJOR.$((MINOR + 1)).0"
                   ;;
                 patch)
