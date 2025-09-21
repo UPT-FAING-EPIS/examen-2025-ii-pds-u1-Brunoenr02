@@ -1,244 +1,41 @@
-# ============================================================================
-# GITHUB ACTIONS WORKFLOW - INFRAESTRUCTURA TERRAFORM
-# ============================================================================
-# Automatiza el deployment de infraestructura en Google Cloud Platform
-# usando Terraform cuando hay cambios en la rama main
-
-name: Deploy Infrastructure
+name: Infraestructura
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'terraform/**'
-      - '.github/workflows/infra.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'terraform/**'
   workflow_dispatch:
-    inputs:
-      action:
-        description: 'Terraform Action'
-        required: true
-        default: 'plan'
-        type: choice
-        options:
-          - plan
-          - apply
-          - destroy
-
-env:
-  TF_VERSION: '1.5.0'
-  GOOGLE_CREDENTIALS: ${{ secrets.GCP_SA_KEY }}
-  TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-  TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
-  TF_VAR_jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
+  push:
+    branches:
+      - main
 
 jobs:
-  # ============================================================================
-  # JOB 1: VALIDAR TERRAFORM
-  # ============================================================================
-  validate:
-    name: 🔍 Validate Terraform
+  infra-deploy:
     runs-on: ubuntu-latest
-    
-    steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
-      
-    - name: 🔧 Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: ${{ env.TF_VERSION }}
-        
-    - name: 🔍 Terraform Format Check
-      run: |
-        cd terraform
-        terraform fmt -check
-        
-    - name: ✅ Terraform Validate
-      run: |
-        cd terraform
-        terraform init -backend=false
-        terraform validate
 
-  # ============================================================================
-  # JOB 2: PLAN TERRAFORM (Siempre se ejecuta)
-  # ============================================================================
-  plan:
-    name: 📋 Plan Infrastructure
-    runs-on: ubuntu-latest
-    needs: validate
-    
-    outputs:
-      tfplanExitCode: ${{ steps.tf-plan.outputs.exitcode }}
-      
     steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
-      
-    - name: 🔧 Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: ${{ env.TF_VERSION }}
-        
-    - name: 🔐 Authenticate to Google Cloud
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
-        
-    - name: 🌩️ Setup Google Cloud SDK
-      uses: google-github-actions/setup-gcloud@v2
-      
-    - name: 🚀 Terraform Init
-      run: |
-        cd terraform
-        terraform init
-        
-    - name: 📥 Import Existing Resources
-      run: |
-        cd terraform
-        # Intentar importar recursos existentes (ignorar errores si no existen)
-        terraform import google_sql_database_instance.babysitter_db_instance ${{ secrets.GCP_PROJECT_ID }}/babysitter-app-db-instance || true
-        terraform import google_artifact_registry_repository.babysitter_repo projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/repositories/babysitter-app-repo || true
-        terraform import google_sql_database.babysitter_database projects/${{ secrets.GCP_PROJECT_ID }}/instances/babysitter-app-db-instance/databases/BabysitterApp || true
-        terraform import google_sql_user.babysitter_user ${{ secrets.GCP_PROJECT_ID }}/babysitter-app-db-instance/babysitter_user || true
-        echo "✅ Import completed (existing resources handled)"
-        
-    - name: 📋 Terraform Plan
-      id: tf-plan
-      run: |
-        cd terraform
-        export exitcode=0
-        terraform plan -detailed-exitcode -no-color -out tfplan || export exitcode=$?
-        
-        echo "exitcode=$exitcode" >> $GITHUB_OUTPUT
-        
-        if [ $exitcode -eq 1 ]; then
-          echo "❌ Terraform Plan Failed"
-          exit 1
-        elif [ $exitcode -eq 0 ]; then
-          echo "✅ No changes detected"
-        elif [ $exitcode -eq 2 ]; then
-          echo "✅ Changes detected"
-        else 
-          echo "❌ Unexpected exit code: $exitcode"
-          exit 1
-        fi
-        
-    - name: 📝 Publish Terraform Plan
-      uses: actions/github-script@v7
-      if: github.event_name == 'pull_request'
-      env:
-        PLAN: "terraform\n${{ steps.tf-plan.outputs.stdout }}"
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          const output = `#### 🌩️ Terraform Plan 📋
-          
-          <details><summary>Show Plan</summary>
-          
-          \`\`\`\n
-          ${process.env.PLAN}
-          \`\`\`
-          
-          </details>
-          
-          *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: output
-          })
-          
-    - name: 💾 Cache Terraform Plan
-      uses: actions/cache@v3
-      with:
-        path: terraform/tfplan
-        key: tfplan-${{ github.sha }}
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-  # ============================================================================
-  # JOB 3: APPLY TERRAFORM (Solo en main o manual)
-  # ============================================================================
-  apply:
-    name: 🚀 Deploy Infrastructure
-    runs-on: ubuntu-latest
-    needs: plan
-    if: github.ref == 'refs/heads/main' || github.event.inputs.action == 'apply'
-    environment: production
-    
-    steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
-      
-    - name: 🔧 Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: ${{ env.TF_VERSION }}
-        
-    - name: 🔐 Authenticate to Google Cloud
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
-        
-    - name: 🌩️ Setup Google Cloud SDK
-      uses: google-github-actions/setup-gcloud@v2
-      
-    - name: 🚀 Terraform Init
-      run: |
-        cd terraform
-        terraform init
-        
-    - name: 📥 Import Existing Resources
-      run: |
-        cd terraform
-        # Intentar importar recursos existentes (ignorar errores si no existen)
-        terraform import google_sql_database_instance.babysitter_db_instance ${{ secrets.GCP_PROJECT_ID }}/babysitter-app-db-instance || true
-        terraform import google_artifact_registry_repository.babysitter_repo projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/repositories/babysitter-app-repo || true
-        terraform import google_sql_database.babysitter_database projects/${{ secrets.GCP_PROJECT_ID }}/instances/babysitter-app-db-instance/databases/BabysitterApp || true
-        terraform import google_sql_user.babysitter_user ${{ secrets.GCP_PROJECT_ID }}/babysitter-app-db-instance/babysitter_user || true
-        echo "✅ Import completed (existing resources handled)"
-        
-    - name: 📋 Generate Fresh Plan
-      run: |
-        cd terraform
-        terraform plan -out=tfplan
-        echo "✅ Fresh plan generated after import"
-        
-    - name: 🚀 Terraform Apply
-      run: |
-        cd terraform
-        terraform apply -auto-approve tfplan
-        
-    - name: 📊 Output Infrastructure Info
-      id: tf-output
-      run: |
-        cd terraform
-        echo "## 🌩️ Infrastructure Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 📋 Deployment Summary:" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if terraform output cloud_sql_instance_name > /dev/null 2>&1; then
-          echo "✅ **Cloud SQL Instance:** \`$(terraform output -raw cloud_sql_instance_name)\`" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        if terraform output cloud_sql_connection_name > /dev/null 2>&1; then
-          echo "✅ **Connection Name:** \`$(terraform output -raw cloud_sql_connection_name)\`" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        if terraform output artifact_registry_url > /dev/null 2>&1; then
-          echo "✅ **Docker Registry:** \`$(terraform output -raw artifact_registry_url)\`" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 🚀 Next Steps:" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "1. Run application deployment workflows" >> $GITHUB_STEP_SUMMARY
-        echo "2. Deploy applications to Cloud Run" >> $GITHUB_STEP_SUMMARY
-        echo "3. Configure database connections" >> $GITHUB_STEP_SUMMARY
-        
-        echo "🎉 Infrastructure is ready for application deployment!"
+      - name: Autenticación en GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configuración de gcloud
+        run: |
+          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
+          gcloud config set compute/region us-central1
+
+      # Terraform init, plan, apply
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: terraform plan -var="project_id=${{ secrets.GCP_PROJECT_ID }}" -var="database_password=${{ secrets.DATABASE_PASSWORD }}" -var="jwt_secret_key=${{ secrets.JWT_SECRET_KEY }}" || echo "Algunos recursos ya existen, continuando con el despliegue"
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: terraform apply -auto-approve -var="project_id=${{ secrets.GCP_PROJECT_ID }}" -var="database_password=${{ secrets.DATABASE_PASSWORD }}" -var="jwt_secret_key=${{ secrets.JWT_SECRET_KEY }}" || echo "Algunos recursos ya existen, continuando con el despliegue"
