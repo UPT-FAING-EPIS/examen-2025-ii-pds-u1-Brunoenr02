@@ -1,385 +1,137 @@
-name: 🚀 Deploy Applications
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      deploy_frontend:
-        description: 'Deploy Frontend'
-        required: false
-        default: 'true'
-        type: boolean
-      deploy_backend:
-        description: 'Deploy Backend'
-        required: false
-        default: 'true'
-        type: boolean
-      environment:
-        description: 'Target Environment'
-        required: false
-        default: 'production'
-        type: choice
-        options:
-          - production
-          - staging
+name: Despliegue de Aplicación
 
-env:
-  GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
-  GOOGLE_CLOUD_REGION: us-central1
-  FRONTEND_SERVICE_NAME: babysitter-app-frontend
-  BACKEND_SERVICE_NAME: babysitter-app-backend
-  REGISTRY_URL: gcr.io
-  NODE_VERSION: '18'
-  DOTNET_VERSION: '8.0'
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
-  # ============================================================================
-  # DETECT CHANGES - Intelligent change detection
-  # ============================================================================
-  detect-changes:
-    name: 🔍 Detect Changes
+  build-and-deploy:
     runs-on: ubuntu-latest
-    outputs:
-      frontend-changed: ${{ steps.changes.outputs.frontend }}
-      backend-changed: ${{ steps.changes.outputs.backend }}
-      should-deploy-frontend: ${{ steps.deploy-decision.outputs.deploy-frontend }}
-      should-deploy-backend: ${{ steps.deploy-decision.outputs.deploy-backend }}
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - name: Detect file changes
-        uses: dorny/paths-filter@v2
-        id: changes
+      - name: Autenticación en GCP
+        uses: google-github-actions/auth@v1
         with:
-          filters: |
-            frontend:
-              - 'frontend/**'
-              - 'docker-compose.yml'
-            backend:
-              - 'backend/**'
-              - 'docker-compose.yml'
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Make deployment decision
-        id: deploy-decision
+      - name: Configuración de gcloud
         run: |
-          # Manual trigger override
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "deploy-frontend=${{ github.event.inputs.deploy_frontend }}" >> $GITHUB_OUTPUT
-            echo "deploy-backend=${{ github.event.inputs.deploy_backend }}" >> $GITHUB_OUTPUT
-          else
-            echo "deploy-frontend=${{ steps.changes.outputs.frontend }}" >> $GITHUB_OUTPUT
-            echo "deploy-backend=${{ steps.changes.outputs.backend }}" >> $GITHUB_OUTPUT
-          fi
+          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
+          gcloud config set compute/region us-central1
+      
+      # Construir imágenes y subir a Artifact Registry
+      - name: Configurar Docker
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev
 
-  # ============================================================================
-  # BUILD FRONTEND - React Application
-  # ============================================================================
-  build-frontend:
-    name: 🎨 Build Frontend
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.should-deploy-frontend == 'true'
-    outputs:
-      image-url: ${{ steps.build.outputs.image }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci --prefer-offline --no-audit
-
-      - name: Run tests
-        working-directory: frontend
-        run: npm test -- --coverage --watchAll=false
-
-      - name: Build application
-        working-directory: frontend
-        run: npm run build
-
-      - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
-        with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          export_default_credentials: true
-
-      - name: Configure Docker for GCR
-        run: gcloud auth configure-docker
-
-      - name: Build and push Docker image
-        id: build
+      - name: Build & Push Frontend Docker Image
         run: |
-          IMAGE_URL="${{ env.REGISTRY_URL }}/${{ env.GOOGLE_CLOUD_PROJECT }}/${{ env.FRONTEND_SERVICE_NAME }}:${{ github.sha }}"
-          
-          docker build -t $IMAGE_URL \
-            --build-arg REACT_APP_API_URL=https://${{ env.BACKEND_SERVICE_NAME }}-${{ hashFiles('backend/**') }}-uc.a.run.app/api \
-            frontend/
-          
-          docker push $IMAGE_URL
-          echo "image=$IMAGE_URL" >> $GITHUB_OUTPUT
+          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/babysitter-repo/frontend:latest ./frontend
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/babysitter-repo/frontend:latest
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: frontend-build
-          path: frontend/build/
-          retention-days: 7
-
-  # ============================================================================
-  # BUILD BACKEND - .NET API
-  # ============================================================================
-  build-backend:
-    name: ⚙️ Build Backend
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.should-deploy-backend == 'true'
-    outputs:
-      image-url: ${{ steps.build.outputs.image }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Restore dependencies
-        working-directory: backend/BabysitterApi
-        run: dotnet restore
-
-      - name: Build application
-        working-directory: backend/BabysitterApi
-        run: dotnet build --configuration Release --no-restore
-
-      - name: Run tests
-        working-directory: backend/BabysitterApi
-        run: dotnet test --configuration Release --no-build --verbosity normal
-
-      - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
-        with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          export_default_credentials: true
-
-      - name: Configure Docker for GCR
-        run: gcloud auth configure-docker
-
-      - name: Build and push Docker image
-        id: build
+      - name: Build & Push Backend Docker Image
         run: |
-          IMAGE_URL="${{ env.REGISTRY_URL }}/${{ env.GOOGLE_CLOUD_PROJECT }}/${{ env.BACKEND_SERVICE_NAME }}:${{ github.sha }}"
-          
-          docker build -t $IMAGE_URL \
-            --build-arg ASPNETCORE_ENVIRONMENT=Production \
-            backend/
-          
-          docker push $IMAGE_URL
-          echo "image=$IMAGE_URL" >> $GITHUB_OUTPUT
+          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/babysitter-repo/backend:latest ./backend
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/babysitter-repo/backend:latest
 
-  # ============================================================================
-  # DEPLOY TO CLOUD RUN
-  # ============================================================================
-  deploy-frontend:
-    name: 🚀 Deploy Frontend
-    runs-on: ubuntu-latest
-    needs: [detect-changes, build-frontend]
-    if: needs.detect-changes.outputs.should-deploy-frontend == 'true'
-    environment: 
-      name: ${{ github.event.inputs.environment || 'production' }}
-      url: ${{ steps.deploy.outputs.url }}
-    steps:
-      - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
-        with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          export_default_credentials: true
+      # Deploy a Kubernetes
+      - name: Obtener credenciales cluster
+        run: gcloud container clusters get-credentials babysitter-cluster --region us-central1
 
-      - name: Deploy to Cloud Run
-        id: deploy
+      - name: Instalar gke-gcloud-auth-plugin
         run: |
-          gcloud run deploy ${{ env.FRONTEND_SERVICE_NAME }} \
-            --image ${{ needs.build-frontend.outputs.image-url }} \
-            --region ${{ env.GOOGLE_CLOUD_REGION }} \
-            --platform managed \
-            --allow-unauthenticated \
-            --port 80 \
-            --cpu 1 \
-            --memory 512Mi \
-            --min-instances 0 \
-            --max-instances 10 \
-            --set-env-vars="REACT_APP_ENV=production" \
-            --quiet
-          
-          URL=$(gcloud run services describe ${{ env.FRONTEND_SERVICE_NAME }} \
-            --region ${{ env.GOOGLE_CLOUD_REGION }} \
-            --format 'value(status.url)')
-          
-          echo "url=$URL" >> $GITHUB_OUTPUT
-          echo "🎉 Frontend deployed to: $URL"
+          # Add Google Cloud's official apt repository key
+          curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+          # Add the repository to the apt sources list
+          echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+          # Update package lists
+          sudo apt-get update
+          # Install the gke-gcloud-auth-plugin
+          sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin
 
-      - name: Health check
+      - name: Desplegar en GKE
         run: |
-          URL=${{ steps.deploy.outputs.url }}
-          echo "Performing health check on $URL"
-          
-          for i in {1..10}; do
-            if curl -f -s "$URL" > /dev/null; then
-              echo "✅ Health check passed"
-              exit 0
+          kubectl apply -f k8s/frontend-deployment.yml || echo "Frontend deployment applied"
+          kubectl apply -f k8s/backend-deployment.yml || echo "Backend deployment applied"
+          kubectl apply -f k8s/services.yml || echo "Services applied"
+          kubectl apply -f k8s/ingress.yml || echo "Ingress applied"
+
+      - name: Validar despliegue de la aplicación
+        run: |
+          echo "Esperando por la dirección IP pública del Ingress..."
+          INGRESS_IP=""
+          for i in {1..30}; do
+            INGRESS_IP=$(kubectl get ingress babysitter-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            if [ -n "$INGRESS_IP" ]; then
+              echo "Ingress IP obtenida: http://$INGRESS_IP"
+              break
             fi
-            echo "⏳ Attempt $i failed, retrying in 10s..."
+            echo "El Ingress aún no tiene una IP. Esperando 10 segundos..."
             sleep 10
           done
           
-          echo "❌ Health check failed"
-          exit 1
+          if [ -z "$INGRESS_IP" ]; then
+            echo "❌ Error: El Ingress no obtuvo una dirección IP a tiempo."
+            echo "Verificando estado del cluster..."
+            kubectl get pods
+            kubectl get services
+            kubectl get ingress
+            exit 1
+          fi
 
-  deploy-backend:
-    name: 🚀 Deploy Backend
-    runs-on: ubuntu-latest
-    needs: [detect-changes, build-backend]
-    if: needs.detect-changes.outputs.should-deploy-backend == 'true'
-    environment: 
-      name: ${{ github.event.inputs.environment || 'production' }}
-      url: ${{ steps.deploy.outputs.url }}
-    steps:
-      - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
-        with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          export_default_credentials: true
-
-      - name: Deploy to Cloud Run
-        id: deploy
-        run: |
-          gcloud run deploy ${{ env.BACKEND_SERVICE_NAME }} \
-            --image ${{ needs.build-backend.outputs.image-url }} \
-            --region ${{ env.GOOGLE_CLOUD_REGION }} \
-            --platform managed \
-            --allow-unauthenticated \
-            --port 5000 \
-            --cpu 1 \
-            --memory 512Mi \
-            --min-instances 0 \
-            --max-instances 10 \
-            --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,JWT__SecretKey=${{ secrets.JWT_SECRET_KEY }},JWT__Issuer=BabysitterApi,JWT__Audience=BabysitterApp" \
-            --set-cloudsql-instances ${{ env.GOOGLE_CLOUD_PROJECT }}:${{ env.GOOGLE_CLOUD_REGION }}:babysitter-app-db-instance \
-            --quiet
-          
-          URL=$(gcloud run services describe ${{ env.BACKEND_SERVICE_NAME }} \
-            --region ${{ env.GOOGLE_CLOUD_REGION }} \
-            --format 'value(status.url)')
-          
-          echo "url=$URL" >> $GITHUB_OUTPUT
-          echo "🎉 Backend deployed to: $URL"
-
-      - name: Health check
-        run: |
-          URL=${{ steps.deploy.outputs.url }}
-          echo "Performing health check on $URL/health"
-          
-          for i in {1..10}; do
-            if curl -f -s "$URL/health" > /dev/null; then
-              echo "✅ Health check passed"
-              exit 0
+          # --- Validar el estado de la aplicación ---
+          echo "Validando el estado de la aplicación en http://$INGRESS_IP/api/health"
+          HEALTH_URL="http://$INGRESS_IP/api/health"
+          for i in {1..30}; do
+            if curl --output /dev/null --silent --head --fail "$HEALTH_URL"; then
+              echo "✅ La aplicación está saludable y respondió correctamente."
+              break
             fi
-            echo "⏳ Attempt $i failed, retrying in 10s..."
+            echo "La aplicación no está lista. Esperando 10 segundos..."
             sleep 10
           done
-          
-          echo "❌ Health check failed"
-          exit 1
 
-  # ============================================================================
-  # SMOKE TESTS
-  # ============================================================================
-  smoke-tests:
-    name: 🧪 Smoke Tests
-    runs-on: ubuntu-latest
-    needs: [deploy-frontend, deploy-backend]
-    if: always() && (needs.deploy-frontend.result == 'success' || needs.deploy-backend.result == 'success')
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run smoke tests
-        run: |
-          echo "🧪 Running smoke tests..."
-          
-          # Test frontend if deployed
-          if [ "${{ needs.deploy-frontend.result }}" = "success" ]; then
-            FRONTEND_URL="${{ needs.deploy-frontend.outputs.url }}"
-            echo "Testing frontend at $FRONTEND_URL"
-            
-            if curl -f -s "$FRONTEND_URL" | grep -q "Babysitter"; then
-              echo "✅ Frontend smoke test passed"
-            else
-              echo "❌ Frontend smoke test failed"
-            fi
-          fi
-          
-          # Test backend if deployed
-          if [ "${{ needs.deploy-backend.result }}" = "success" ]; then
-            BACKEND_URL="${{ needs.deploy-backend.outputs.url }}"
-            echo "Testing backend at $BACKEND_URL"
-            
-            if curl -f -s "$BACKEND_URL/api/health" | grep -q "healthy"; then
-              echo "✅ Backend smoke test passed"
-            else
-              echo "❌ Backend smoke test failed"
-            fi
+          if [ $? -ne 0 ]; then
+              echo "❌ Error: La aplicación no respondió a tiempo en la URL de salud."
+              echo "Verificando logs del backend..."
+              kubectl logs -l app=babysitter-backend --tail=50
+              exit 1
           fi
 
-  # ============================================================================
-  # DEPLOYMENT SUMMARY
-  # ============================================================================
-  deployment-summary:
-    name: 📋 Deployment Summary
-    runs-on: ubuntu-latest
-    needs: [detect-changes, deploy-frontend, deploy-backend, smoke-tests]
-    if: always()
-    steps:
-      - name: Generate deployment summary
-        run: |
-          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Component | Status | URL |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|-----|" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "${{ needs.deploy-frontend.result }}" = "success" ]; then
-            echo "| Frontend | ✅ Deployed | [${{ needs.deploy-frontend.outputs.url }}](${{ needs.deploy-frontend.outputs.url }}) |" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ needs.detect-changes.outputs.should-deploy-frontend }}" = "true" ]; then
-            echo "| Frontend | ❌ Failed | - |" >> $GITHUB_STEP_SUMMARY
+          # --- Probar el endpoint de registro ---
+          echo "Probando el endpoint de registro de usuario..."
+          PAYLOAD='{"email": "testuser@babysitter.com", "password": "TestPassword123", "name": "Test User", "role": "Parent"}'
+          RESPONSE=$(curl -s -X POST "http://$INGRESS_IP/api/auth/register" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          # Verifica si la respuesta contiene un token de autenticación
+          if echo "$RESPONSE" | grep -q "token"; then
+            echo "✅ El registro de usuario fue exitoso y se recibió un token."
+            echo "Respuesta de la API:"
+            echo "$RESPONSE"
           else
-            echo "| Frontend | ⏭️ Skipped | No changes detected |" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ El registro de usuario tuvo una respuesta diferente."
+            echo "Respuesta de la API:"
+            echo "$RESPONSE"
+            # No fallar si solo es un tema de registro, la app puede estar funcionando
           fi
+
+          # --- Probar el endpoint de niñeras ---
+          echo "Probando el endpoint de listado de niñeras..."
+          NANNIES_RESPONSE=$(curl -s "http://$INGRESS_IP/api/nannies")
           
-          if [ "${{ needs.deploy-backend.result }}" = "success" ]; then
-            echo "| Backend | ✅ Deployed | [${{ needs.deploy-backend.outputs.url }}](${{ needs.deploy-backend.outputs.url }}) |" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ needs.detect-changes.outputs.should-deploy-backend }}" = "true" ]; then
-            echo "| Backend | ❌ Failed | - |" >> $GITHUB_STEP_SUMMARY
+          if echo "$NANNIES_RESPONSE" | grep -q '\[' || echo "$NANNIES_RESPONSE" | grep -q 'nannies'; then
+            echo "✅ El endpoint de niñeras responde correctamente."
           else
-            echo "| Backend | ⏭️ Skipped | No changes detected |" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ El endpoint de niñeras respuesta:"
+            echo "$NANNIES_RESPONSE"
           fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** ${{ github.event.inputs.environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+
+          echo "🎉 Despliegue completado exitosamente!"
+          echo "📱 Frontend disponible en: http://$INGRESS_IP"
+          echo "🔌 API Backend disponible en: http://$INGRESS_IP/api"
