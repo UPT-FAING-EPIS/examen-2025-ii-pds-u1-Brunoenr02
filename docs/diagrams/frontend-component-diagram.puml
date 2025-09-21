@@ -1,0 +1,5 @@
+@startuml
+title Babysitter Frontend Component Diagram
+package frontend {
+}
+@enduml

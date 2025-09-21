@@ -1,0 +1,23 @@
+@startuml
+title Babysitter Backend Class Diagram
+package backend {
+  class ReviewsController
+  class NanniesController
+  class AuthController
+  class BookingsController
+  class DisponibilidadRaw
+  class Reserva
+  class Ninera
+  class Usuario
+  class Disponibilidad
+  class Resena
+  class BabysitterContext
+  class JwtService
+  class CreateBookingDto
+  class LoginDto
+  class RegisterDto
+  class AuthResponseDto
+  class BookingDto
+  class NannyListDto
+}
+@enduml
