@@ -1,0 +1,490 @@
+name: 🏷️ Release Management
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'terraform/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'package.json'
+      - '**/*.csproj'
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release Type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      pre_release:
+        description: 'Pre-release'
+        required: false
+        default: false
+        type: boolean
+      custom_version:
+        description: 'Custom Version (e.g., 1.2.3)'
+        required: false
+        type: string
+
+env:
+  GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+  GOOGLE_CLOUD_REGION: us-central1
+  REGISTRY_URL: gcr.io
+  NODE_VERSION: '18'
+  DOTNET_VERSION: '8.0'
+
+jobs:
+  # ============================================================================
+  # VERSION CALCULATION - Semantic Versioning
+  # ============================================================================
+  calculate-version:
+    name: 📊 Calculate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+      is-release: ${{ steps.version.outputs.is-release }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install semantic-release
+        run: |
+          npm install -g semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github
+
+      - name: Calculate next version
+        id: version
+        run: |
+          # Get current version from git tags
+          CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          CURRENT_VERSION=${CURRENT_VERSION#v}
+          
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Handle manual workflow dispatch
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "${{ github.event.inputs.custom_version }}" ]; then
+              NEW_VERSION="${{ github.event.inputs.custom_version }}"
+            else
+              # Parse current version
+              IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+              MAJOR=${VERSION_PARTS[0]:-0}
+              MINOR=${VERSION_PARTS[1]:-0}
+              PATCH=${VERSION_PARTS[2]:-0}
+              
+              case "${{ github.event.inputs.release_type }}" in
+                major)
+                  NEW_VERSION="$((MAJOR + 1)).0.0"
+                  ;;
+                minor)
+                  NEW_VERSION="$MAJOR.$((MINOR + 1)).0"
+                  ;;
+                patch)
+                  NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+                  ;;
+                *)
+                  NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+                  ;;
+              esac
+            fi
+            
+            IS_RELEASE="true"
+          else
+            # Automatic version calculation based on commit messages
+            COMMITS_SINCE_TAG=$(git rev-list ${CURRENT_VERSION}..HEAD --count 2>/dev/null || git rev-list HEAD --count)
+            
+            if [ $COMMITS_SINCE_TAG -eq 0 ]; then
+              echo "No new commits since last release"
+              NEW_VERSION="$CURRENT_VERSION"
+              IS_RELEASE="false"
+            else
+              # Check commit messages for version bump indicators
+              COMMIT_MESSAGES=$(git log ${CURRENT_VERSION}..HEAD --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
+              
+              IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+              MAJOR=${VERSION_PARTS[0]:-0}
+              MINOR=${VERSION_PARTS[1]:-0}
+              PATCH=${VERSION_PARTS[2]:-0}
+              
+              if echo "$COMMIT_MESSAGES" | grep -qE "^(BREAKING CHANGE|feat!|fix!|perf!)"; then
+                NEW_VERSION="$((MAJOR + 1)).0.0"
+              elif echo "$COMMIT_MESSAGES" | grep -qE "^feat(\(.*\))?:"; then
+                NEW_VERSION="$MAJOR.$((MINOR + 1)).0"
+              elif echo "$COMMIT_MESSAGES" | grep -qE "^(fix|perf|docs|style|refactor|test|chore)(\(.*\))?:"; then
+                NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+              else
+                NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+              fi
+              
+              IS_RELEASE="true"
+            fi
+          fi
+          
+          echo "New version: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "is-release=$IS_RELEASE" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        if: steps.version.outputs.is-release == 'true'
+        run: |
+          CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          NEW_VERSION="v${{ steps.version.outputs.version }}"
+          
+          echo "# Changelog for $NEW_VERSION" > TEMP_CHANGELOG.md
+          echo "" >> TEMP_CHANGELOG.md
+          echo "**Release Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> TEMP_CHANGELOG.md
+          echo "" >> TEMP_CHANGELOG.md
+          
+          # Get commits since last tag
+          if [ "$CURRENT_VERSION" != "v0.0.0" ]; then
+            COMMITS=$(git log ${CURRENT_VERSION}..HEAD --pretty=format:"- %s (%an)" --reverse)
+          else
+            COMMITS=$(git log --pretty=format:"- %s (%an)" --reverse)
+          fi
+          
+          if [ -n "$COMMITS" ]; then
+            echo "## 🚀 Changes" >> TEMP_CHANGELOG.md
+            echo "" >> TEMP_CHANGELOG.md
+            
+            # Categorize commits
+            echo "$COMMITS" | grep -E "^- feat(\(.*\))?:" | sed 's/^- feat[^:]*: /- ✨ /' >> TEMP_CHANGELOG.md || true
+            echo "$COMMITS" | grep -E "^- fix(\(.*\))?:" | sed 's/^- fix[^:]*: /- 🐛 /' >> TEMP_CHANGELOG.md || true
+            echo "$COMMITS" | grep -E "^- perf(\(.*\))?:" | sed 's/^- perf[^:]*: /- ⚡ /' >> TEMP_CHANGELOG.md || true
+            echo "$COMMITS" | grep -E "^- docs(\(.*\))?:" | sed 's/^- docs[^:]*: /- 📚 /' >> TEMP_CHANGELOG.md || true
+            echo "$COMMITS" | grep -E "^- style(\(.*\))?:" | sed 's/^- style[^:]*: /- 💎 /' >> TEMP_CHANGELOG.md || true
+            echo "$COMMITS" | grep -E "^- refactor(\(.*\))?:" | sed 's/^- refactor[^:]*: /- ♻️ /' >> TEMP_CHANGELOG.md || true
+            echo "$COMMITS" | grep -E "^- test(\(.*\))?:" | sed 's/^- test[^:]*: /- ✅ /' >> TEMP_CHANGELOG.md || true
+            echo "$COMMITS" | grep -E "^- chore(\(.*\))?:" | sed 's/^- chore[^:]*: /- 🔧 /' >> TEMP_CHANGELOG.md || true
+            
+            # Add other commits
+            echo "$COMMITS" | grep -vE "^- (feat|fix|perf|docs|style|refactor|test|chore)(\(.*\))?:" | sed 's/^- /- 📝 /' >> TEMP_CHANGELOG.md || true
+          else
+            echo "- 📝 Minor updates and improvements" >> TEMP_CHANGELOG.md
+          fi
+          
+          echo "" >> TEMP_CHANGELOG.md
+          echo "## 📊 Statistics" >> TEMP_CHANGELOG.md
+          echo "" >> TEMP_CHANGELOG.md
+          
+          if [ "$CURRENT_VERSION" != "v0.0.0" ]; then
+            COMMIT_COUNT=$(git rev-list ${CURRENT_VERSION}..HEAD --count)
+            FILES_CHANGED=$(git diff --name-only ${CURRENT_VERSION}..HEAD | wc -l)
+            LINES_ADDED=$(git diff --shortstat ${CURRENT_VERSION}..HEAD | grep -oE '[0-9]+ insertions?' | grep -oE '[0-9]+' || echo "0")
+            LINES_DELETED=$(git diff --shortstat ${CURRENT_VERSION}..HEAD | grep -oE '[0-9]+ deletions?' | grep -oE '[0-9]+' || echo "0")
+          else
+            COMMIT_COUNT=$(git rev-list HEAD --count)
+            FILES_CHANGED=$(git ls-files | wc -l)
+            LINES_ADDED=$(git log --pretty=tformat: --numstat | awk '{ add += $1 } END { print add }' || echo "0")
+            LINES_DELETED=$(git log --pretty=tformat: --numstat | awk '{ del += $2 } END { print del }' || echo "0")
+          fi
+          
+          echo "- 📈 **$COMMIT_COUNT** commits" >> TEMP_CHANGELOG.md
+          echo "- 📁 **$FILES_CHANGED** files changed" >> TEMP_CHANGELOG.md
+          echo "- ➕ **$LINES_ADDED** lines added" >> TEMP_CHANGELOG.md
+          echo "- ➖ **$LINES_DELETED** lines deleted" >> TEMP_CHANGELOG.md
+          
+          # Save changelog
+          CHANGELOG_CONTENT=$(cat TEMP_CHANGELOG.md | base64 -w 0)
+          echo "changelog=$CHANGELOG_CONTENT" >> $GITHUB_OUTPUT
+
+  # ============================================================================
+  # BUILD RELEASE ASSETS
+  # ============================================================================
+  build-assets:
+    name: 🔨 Build Release Assets
+    runs-on: ubuntu-latest
+    needs: calculate-version
+    if: needs.calculate-version.outputs.is-release == 'true'
+    strategy:
+      matrix:
+        include:
+          - component: frontend
+            path: frontend
+          - component: backend
+            path: backend/BabysitterApi
+    outputs:
+      frontend-artifact: ${{ steps.upload-frontend.outputs.artifact-id }}
+      backend-artifact: ${{ steps.upload-backend.outputs.artifact-id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js (Frontend)
+        if: matrix.component == 'frontend'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up .NET (Backend)
+        if: matrix.component == 'backend'
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build Frontend
+        if: matrix.component == 'frontend'
+        working-directory: frontend
+        run: |
+          npm ci --prefer-offline --no-audit
+          npm run build
+          
+          # Create release package
+          cd build
+          tar -czf ../babysitter-frontend-v${{ needs.calculate-version.outputs.version }}.tar.gz *
+          cd ..
+          
+          # Generate checksums
+          sha256sum babysitter-frontend-v${{ needs.calculate-version.outputs.version }}.tar.gz > checksums.txt
+
+      - name: Build Backend
+        if: matrix.component == 'backend'
+        working-directory: backend/BabysitterApi
+        run: |
+          dotnet restore
+          dotnet publish -c Release -o publish --no-restore
+          
+          # Create release package
+          cd publish
+          tar -czf ../babysitter-backend-v${{ needs.calculate-version.outputs.version }}.tar.gz *
+          cd ..
+          
+          # Generate checksums
+          sha256sum babysitter-backend-v${{ needs.calculate-version.outputs.version }}.tar.gz > checksums.txt
+
+      - name: Upload Frontend Artifacts
+        if: matrix.component == 'frontend'
+        id: upload-frontend
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-release-v${{ needs.calculate-version.outputs.version }}
+          path: |
+            frontend/babysitter-frontend-v${{ needs.calculate-version.outputs.version }}.tar.gz
+            frontend/checksums.txt
+          retention-days: 90
+
+      - name: Upload Backend Artifacts
+        if: matrix.component == 'backend'
+        id: upload-backend
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-release-v${{ needs.calculate-version.outputs.version }}
+          path: |
+            backend/BabysitterApi/babysitter-backend-v${{ needs.calculate-version.outputs.version }}.tar.gz
+            backend/BabysitterApi/checksums.txt
+          retention-days: 90
+
+  # ============================================================================
+  # BUILD AND PUSH DOCKER IMAGES
+  # ============================================================================
+  build-docker-images:
+    name: 🐳 Build Docker Images
+    runs-on: ubuntu-latest
+    needs: calculate-version
+    if: needs.calculate-version.outputs.is-release == 'true'
+    strategy:
+      matrix:
+        component: [frontend, backend]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          export_default_credentials: true
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker
+
+      - name: Build and push images
+        run: |
+          VERSION="v${{ needs.calculate-version.outputs.version }}"
+          
+          if [ "${{ matrix.component }}" = "frontend" ]; then
+            IMAGE_NAME="babysitter-app-frontend"
+            DOCKERFILE_PATH="frontend"
+          else
+            IMAGE_NAME="babysitter-app-backend"
+            DOCKERFILE_PATH="backend"
+          fi
+          
+          BASE_URL="${{ env.REGISTRY_URL }}/${{ env.GOOGLE_CLOUD_PROJECT }}/${IMAGE_NAME}"
+          
+          # Build and tag images
+          docker build -t ${BASE_URL}:${VERSION} \
+                      -t ${BASE_URL}:latest \
+                      ${DOCKERFILE_PATH}/
+          
+          # Push images
+          docker push ${BASE_URL}:${VERSION}
+          docker push ${BASE_URL}:latest
+          
+          echo "✅ Pushed ${IMAGE_NAME}:${VERSION}"
+
+  # ============================================================================
+  # CREATE GITHUB RELEASE
+  # ============================================================================
+  create-release:
+    name: 🏷️ Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [calculate-version, build-assets, build-docker-images]
+    if: needs.calculate-version.outputs.is-release == 'true'
+    outputs:
+      release-url: ${{ steps.create-release.outputs.html_url }}
+      upload-url: ${{ steps.create-release.outputs.upload_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: release-assets
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-files
+          find release-assets -name "*.tar.gz" -exec cp {} release-files/ \;
+          find release-assets -name "checksums.txt" -exec cp {} release-files/ \;
+          
+          # Combine checksums
+          cat release-files/checksums.txt > release-files/SHA256SUMS.txt || true
+          rm -f release-files/checksums.txt
+          
+          # Create release notes
+          echo '${{ needs.calculate-version.outputs.changelog }}' | base64 -d > release-files/RELEASE_NOTES.md
+
+      - name: Create Release
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ needs.calculate-version.outputs.version }}
+          release_name: Babysitter App v${{ needs.calculate-version.outputs.version }}
+          body_path: release-files/RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ github.event.inputs.pre_release == 'true' }}
+
+      - name: Upload Release Assets
+        run: |
+          VERSION="v${{ needs.calculate-version.outputs.version }}"
+          UPLOAD_URL="${{ steps.create-release.outputs.upload_url }}"
+          
+          for file in release-files/*.tar.gz release-files/SHA256SUMS.txt; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              echo "Uploading $filename..."
+              
+              curl -X POST \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary @"$file" \
+                "${UPLOAD_URL%\{*}?name=$filename"
+            fi
+          done
+
+  # ============================================================================
+  # POST-RELEASE ACTIVITIES
+  # ============================================================================
+  post-release:
+    name: 📝 Post-Release Activities
+    runs-on: ubuntu-latest
+    needs: [calculate-version, create-release]
+    if: needs.calculate-version.outputs.is-release == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update CHANGELOG.md
+        run: |
+          VERSION="v${{ needs.calculate-version.outputs.version }}"
+          
+          # Decode and prepare changelog
+          echo '${{ needs.calculate-version.outputs.changelog }}' | base64 -d > NEW_CHANGELOG.md
+          
+          # Update or create CHANGELOG.md
+          if [ -f CHANGELOG.md ]; then
+            # Backup existing changelog
+            cp CHANGELOG.md CHANGELOG_BACKUP.md
+            
+            # Prepend new changelog
+            echo "# Changelog" > CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            cat NEW_CHANGELOG.md >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            echo "---" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            tail -n +2 CHANGELOG_BACKUP.md >> CHANGELOG.md
+          else
+            echo "# Changelog" > CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            cat NEW_CHANGELOG.md >> CHANGELOG.md
+          fi
+          
+          # Clean up
+          rm -f NEW_CHANGELOG.md CHANGELOG_BACKUP.md
+
+      - name: Update version in package files
+        run: |
+          VERSION="${{ needs.calculate-version.outputs.version }}"
+          
+          # Update frontend package.json
+          if [ -f frontend/package.json ]; then
+            sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" frontend/package.json
+          fi
+          
+          # Update backend csproj files
+          find backend -name "*.csproj" -exec sed -i "s/<Version>[^<]*<\/Version>/<Version>$VERSION<\/Version>/" {} \;
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          git add CHANGELOG.md frontend/package.json backend/**/*.csproj || true
+          
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: update version to v${{ needs.calculate-version.outputs.version }} [skip ci]"
+            git push
+          fi
+
+      - name: Create summary
+        run: |
+          echo "## 🎉 Release v${{ needs.calculate-version.outputs.version }} Created Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Release Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** v${{ needs.calculate-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release URL:** ${{ needs.create-release.outputs.release-url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pre-release:** ${{ github.event.inputs.pre_release == 'true' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🐳 Docker Images" >> $GITHUB_STEP_SUMMARY
+          echo "- \`gcr.io/${{ env.GOOGLE_CLOUD_PROJECT }}/babysitter-app-frontend:v${{ needs.calculate-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`gcr.io/${{ env.GOOGLE_CLOUD_PROJECT }}/babysitter-app-backend:v${{ needs.calculate-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Verify the release at ${{ needs.create-release.outputs.release-url }}" >> $GITHUB_STEP_SUMMARY
+          echo "2. Update deployment configurations to use the new version" >> $GITHUB_STEP_SUMMARY
+          echo "3. Monitor application performance and user feedback" >> $GITHUB_STEP_SUMMARY
+          echo "4. Consider announcing the release to stakeholders" >> $GITHUB_STEP_SUMMARY

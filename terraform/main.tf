@@ -123,12 +123,23 @@ resource "google_artifact_registry_repository" "babysitter_repo" {
 
 # Backend API Service
 resource "google_cloud_run_service" "backend" {
-  name     = "${var.app_name}-backend"
+  name     = "${var.app_name}-backend-v2"
   location = var.region
   depends_on = [
     google_project_service.services,
     google_sql_database_instance.babysitter_db_instance
   ]
+
+  lifecycle {
+    ignore_changes = [
+      template[0].spec[0].containers[0].image,
+      template[0].metadata[0].annotations["run.googleapis.com/cpu-throttling"],
+      template[0].metadata[0].annotations["client.knative.dev/user-image"],
+      template[0].metadata[0].annotations["run.googleapis.com/client-name"],
+      template[0].metadata[0].annotations["run.googleapis.com/client-version"],
+      template[0].metadata[0].labels
+    ]
+  }
 
   template {
     spec {
@@ -190,12 +201,23 @@ resource "google_cloud_run_service" "backend" {
 
 # Frontend Service
 resource "google_cloud_run_service" "frontend" {
-  name     = "${var.app_name}-frontend"
+  name     = "${var.app_name}-frontend-v2"
   location = var.region
   depends_on = [
     google_project_service.services,
     google_cloud_run_service.backend
   ]
+
+  lifecycle {
+    ignore_changes = [
+      template[0].spec[0].containers[0].image,
+      template[0].metadata[0].annotations["run.googleapis.com/cpu-throttling"],
+      template[0].metadata[0].annotations["client.knative.dev/user-image"],
+      template[0].metadata[0].annotations["run.googleapis.com/client-name"],
+      template[0].metadata[0].annotations["run.googleapis.com/client-version"],
+      template[0].metadata[0].labels
+    ]
+  }
 
   template {
     spec {
