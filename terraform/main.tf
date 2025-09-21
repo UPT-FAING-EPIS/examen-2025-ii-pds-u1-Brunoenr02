@@ -38,6 +38,14 @@ resource "google_sql_database_instance" "babysitter_db_instance" {
   region           = var.region
   depends_on       = [google_project_service.services]
 
+  lifecycle {
+    ignore_changes = [
+      name,
+      database_version,
+      region
+    ]
+  }
+
   settings {
     tier = var.db_tier
 
@@ -87,10 +95,11 @@ resource "google_artifact_registry_repository" "babysitter_repo" {
   format        = "DOCKER"
   depends_on    = [google_project_service.services]
 
-  # Handle existing repository
   lifecycle {
     ignore_changes = [
+      repository_id,
       description,
+      format
     ]
   }
 }

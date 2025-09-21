@@ -96,7 +96,15 @@ jobs:
         cd terraform
         terraform init
         
-    - name: 📋 Terraform Plan
+    - name: � Import Existing Resources
+      run: |
+        cd terraform
+        # Intentar importar recursos existentes (ignorar errores si no existen)
+        terraform import google_sql_database_instance.babysitter_db_instance ${{ secrets.GCP_PROJECT_ID }}/babysitter-app-db-instance || true
+        terraform import google_artifact_registry_repository.babysitter_repo projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/repositories/babysitter-app-repo || true
+        echo "✅ Import completed (existing resources handled)"
+        
+    - name: �📋 Terraform Plan
       id: tf-plan
       run: |
         cd terraform
@@ -182,7 +190,15 @@ jobs:
         cd terraform
         terraform init
         
-    - name: 💾 Restore Terraform Plan
+    - name: � Import Existing Resources
+      run: |
+        cd terraform
+        # Intentar importar recursos existentes (ignorar errores si no existen)
+        terraform import google_sql_database_instance.babysitter_db_instance ${{ secrets.GCP_PROJECT_ID }}/babysitter-app-db-instance || true
+        terraform import google_artifact_registry_repository.babysitter_repo projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/repositories/babysitter-app-repo || true
+        echo "✅ Import completed (existing resources handled)"
+        
+    - name: �💾 Restore Terraform Plan
       uses: actions/cache@v3
       with:
         path: terraform/tfplan
