@@ -10,9 +10,15 @@ jobs:
   generate-diagram:
     runs-on: ubuntu-latest
     
+    permissions:
+      contents: write
+      actions: read
+    
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
@@ -100,11 +106,21 @@ jobs:
       
       - name: Commit and Push Diagram
         run: |
-          git config --global user.name "GitHub Actions Bot"
-          git config --global user.email "actions@github.com"
+          git config --local user.name "${{ github.actor }}"
+          git config --local user.email "${{ github.actor }}@users.noreply.github.com"
           mkdir -p docs/diagrams
           cp terraform/terraform-graph.png docs/diagrams/
           cp terraform/infra-docs.md docs/
           git add docs/diagrams/terraform-graph.png docs/infra-docs.md
-          git commit -m "Actualizar diagrama de infraestructura [skip ci]" || echo "No changes to commit"
-          git push
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "📊 Actualizar diagrama de infraestructura
+            
+            - Diagrama actualizado automáticamente
+            - Documentación de Terraform actualizada
+            
+            [skip ci]"
+            git push
+            echo "✅ Diagrams updated successfully!"
+          fi
