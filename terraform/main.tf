@@ -75,6 +75,12 @@ resource "google_sql_database_instance" "babysitter_db_instance" {
 resource "google_sql_database" "babysitter_database" {
   name     = var.database_name
   instance = google_sql_database_instance.babysitter_db_instance.name
+
+  lifecycle {
+    ignore_changes = [
+      name
+    ]
+  }
 }
 
 # Database User
@@ -82,6 +88,13 @@ resource "google_sql_user" "babysitter_user" {
   name     = var.database_user
   instance = google_sql_database_instance.babysitter_db_instance.name
   password = var.database_password
+
+  lifecycle {
+    ignore_changes = [
+      name,
+      password
+    ]
+  }
 }
 
 # ============================================================================
@@ -120,7 +133,7 @@ resource "google_cloud_run_service" "backend" {
   template {
     spec {
       containers {
-        image = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.babysitter_repo.repository_id}/backend:${var.backend_image_tag}"
+        image = "gcr.io/cloudrun/hello"
 
         resources {
           limits = {
@@ -187,7 +200,7 @@ resource "google_cloud_run_service" "frontend" {
   template {
     spec {
       containers {
-        image = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.babysitter_repo.repository_id}/frontend:${var.frontend_image_tag}"
+        image = "gcr.io/cloudrun/hello"
 
         resources {
           limits = {

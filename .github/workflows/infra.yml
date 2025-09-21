@@ -102,6 +102,8 @@ jobs:
         # Intentar importar recursos existentes (ignorar errores si no existen)
         terraform import google_sql_database_instance.babysitter_db_instance ${{ secrets.GCP_PROJECT_ID }}/babysitter-app-db-instance || true
         terraform import google_artifact_registry_repository.babysitter_repo projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/repositories/babysitter-app-repo || true
+        terraform import google_sql_database.babysitter_database projects/${{ secrets.GCP_PROJECT_ID }}/instances/babysitter-app-db-instance/databases/BabysitterApp || true
+        terraform import google_sql_user.babysitter_user ${{ secrets.GCP_PROJECT_ID }}/babysitter-app-db-instance/babysitter_user || true
         echo "✅ Import completed (existing resources handled)"
         
     - name: 📋 Terraform Plan
@@ -196,6 +198,8 @@ jobs:
         # Intentar importar recursos existentes (ignorar errores si no existen)
         terraform import google_sql_database_instance.babysitter_db_instance ${{ secrets.GCP_PROJECT_ID }}/babysitter-app-db-instance || true
         terraform import google_artifact_registry_repository.babysitter_repo projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/repositories/babysitter-app-repo || true
+        terraform import google_sql_database.babysitter_database projects/${{ secrets.GCP_PROJECT_ID }}/instances/babysitter-app-db-instance/databases/BabysitterApp || true
+        terraform import google_sql_user.babysitter_user ${{ secrets.GCP_PROJECT_ID }}/babysitter-app-db-instance/babysitter_user || true
         echo "✅ Import completed (existing resources handled)"
         
     - name: 📋 Generate Fresh Plan
